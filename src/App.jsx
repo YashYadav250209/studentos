@@ -1,0 +1,2793 @@
+import React, { useState, useEffect, useMemo, useCallback } from "react";
+import {
+  Flame, Zap, Clock, CalendarDays, Sun, Moon, LayoutDashboard,
+  BookOpen, Timer as TimerIcon, ListChecks, LineChart, ChevronRight,
+  Search, X, Check, Building2, Bell, MapPin, FileText, Video, Link2,
+  AlertCircle, Users, GraduationCap, PartyPopper, CreditCard, LogOut,
+  Mail, Lock, Sparkles, ShieldCheck,
+} from "lucide-react";
+
+/* ============================================================================
+   DATA LAYER (db.js equivalent)
+   Every function here is written the way a real API call would be shaped
+   (async, keyed by userId, returns/accepts plain objects) so that swapping
+   window.storage for a real backend later is a drop-in change — no caller
+   in this file should ever need to change.
+   ============================================================================ */
+
+const STORAGE_KEYS = {
+  profile: "studentos:profile",
+  topicStatus: "studentos:topic-status:jee",
+  sessions: "studentos:sessions",
+  tasks: "studentos:tasks",
+  readNotices: "studentos:read-notices",
+  auth: "studentos:auth",
+};
+
+const DEFAULT_PROFILE = {
+  name: "Student",
+  examId: "jee",
+  dailyGoalMinutes: 120,
+  theme: "dark",
+  xp: 0,
+  streak: { current: 0, longest: 0, lastActiveDate: null },
+  lastGoalBonusDate: null,
+  plan: "free",
+};
+
+const DEFAULT_AUTH = { loggedIn: false, email: null };
+
+const db = {
+  async getProfile() {
+    try {
+      const res = await window.storage.get(STORAGE_KEYS.profile, false);
+      return res ? JSON.parse(res.value) : DEFAULT_PROFILE;
+    } catch {
+      return DEFAULT_PROFILE;
+    }
+  },
+  async saveProfile(profile) {
+    try {
+      await window.storage.set(STORAGE_KEYS.profile, JSON.stringify(profile), false);
+    } catch (e) {
+      console.error("saveProfile failed", e);
+    }
+    return profile;
+  },
+  async getTopicStatus() {
+    try {
+      const res = await window.storage.get(STORAGE_KEYS.topicStatus, false);
+      return res ? JSON.parse(res.value) : {};
+    } catch {
+      return {};
+    }
+  },
+  async saveTopicStatus(map) {
+    try {
+      await window.storage.set(STORAGE_KEYS.topicStatus, JSON.stringify(map), false);
+    } catch (e) {
+      console.error("saveTopicStatus failed", e);
+    }
+    return map;
+  },
+  async getSessions() {
+    try {
+      const res = await window.storage.get(STORAGE_KEYS.sessions, false);
+      return res ? JSON.parse(res.value) : [];
+    } catch {
+      return [];
+    }
+  },
+  async saveSessions(sessions) {
+    try {
+      await window.storage.set(STORAGE_KEYS.sessions, JSON.stringify(sessions), false);
+    } catch (e) {
+      console.error("saveSessions failed", e);
+    }
+    return sessions;
+  },
+  async getTasks() {
+    try {
+      const res = await window.storage.get(STORAGE_KEYS.tasks, false);
+      return res ? JSON.parse(res.value) : [];
+    } catch {
+      return [];
+    }
+  },
+  async saveTasks(tasks) {
+    try {
+      await window.storage.set(STORAGE_KEYS.tasks, JSON.stringify(tasks), false);
+    } catch (e) {
+      console.error("saveTasks failed", e);
+    }
+    return tasks;
+  },
+  async getReadNotices() {
+    try {
+      const res = await window.storage.get(STORAGE_KEYS.readNotices, false);
+      return res ? JSON.parse(res.value) : [];
+    } catch {
+      return [];
+    }
+  },
+  async saveReadNotices(ids) {
+    try {
+      await window.storage.set(STORAGE_KEYS.readNotices, JSON.stringify(ids), false);
+    } catch (e) {
+      console.error("saveReadNotices failed", e);
+    }
+    return ids;
+  },
+  // DEMO ONLY: this stores a boolean "logged in" flag and the email the
+  // person typed, nothing else. No password is ever stored, hashed, or
+  // checked — there is no real authentication here. A real version of this
+  // would call a backend auth endpoint instead of window.storage.
+  async getAuth() {
+    try {
+      const res = await window.storage.get(STORAGE_KEYS.auth, false);
+      return res ? JSON.parse(res.value) : DEFAULT_AUTH;
+    } catch {
+      return DEFAULT_AUTH;
+    }
+  },
+  async saveAuth(auth) {
+    try {
+      await window.storage.set(STORAGE_KEYS.auth, JSON.stringify(auth), false);
+    } catch (e) {
+      console.error("saveAuth failed", e);
+    }
+    return auth;
+  },
+};
+
+/* ============================================================================
+   JEE SYLLABUS DATA
+   Structured so a second exam (NEET, CBSE...) is just another entry in EXAMS
+   with its own subject/topic tree — nothing downstream is JEE-specific.
+   ============================================================================ */
+
+const EXAMS = {
+  jee: {
+    id: "jee",
+    name: "JEE (Main + Advanced)",
+    subjectIds: ["physics", "chemistry", "mathematics"],
+  },
+};
+
+const SUBJECTS = {
+  physics: { id: "physics", examId: "jee", name: "Physics", color: "#5B8DEF" },
+  chemistry: { id: "chemistry", examId: "jee", name: "Chemistry", color: "#34C77B" },
+  mathematics: { id: "mathematics", examId: "jee", name: "Mathematics", color: "#F2A93B" },
+};
+
+const TOPICS = {
+  physics: [
+    "Units & Measurements", "Kinematics", "Laws of Motion", "Work, Energy & Power",
+    "Rotational Motion", "Gravitation", "Properties of Solids & Liquids",
+    "Thermodynamics", "Kinetic Theory of Gases", "Oscillations & Waves",
+    "Electrostatics", "Current Electricity", "Magnetic Effects of Current",
+    "Electromagnetic Induction & AC", "Electromagnetic Waves", "Ray & Wave Optics",
+    "Dual Nature of Matter & Radiation", "Atoms & Nuclei",
+    "Electronic Devices", "Communication Systems",
+  ],
+  chemistry: [
+    "Basic Concepts of Chemistry", "Atomic Structure", "Chemical Bonding",
+    "States of Matter", "Chemical Thermodynamics", "Equilibrium",
+    "Redox Reactions", "Electrochemistry", "Chemical Kinetics", "Surface Chemistry",
+    "Classification & Periodicity", "Isolation of Metals", "Hydrogen",
+    "s-Block Elements", "p-Block Elements", "d & f Block Elements",
+    "Coordination Compounds", "Environmental Chemistry",
+    "Basic Principles of Organic Chemistry", "Hydrocarbons", "Halogen Derivatives",
+    "Alcohols, Phenols & Ethers", "Aldehydes, Ketones & Carboxylic Acids",
+    "Organic Compounds Containing Nitrogen", "Biomolecules", "Polymers",
+    "Chemistry in Everyday Life",
+  ],
+  mathematics: [
+    "Sets, Relations & Functions", "Complex Numbers & Quadratic Equations",
+    "Matrices & Determinants", "Permutations & Combinations", "Binomial Theorem",
+    "Sequences & Series", "Limits, Continuity & Differentiability",
+    "Differential Calculus", "Integral Calculus", "Differential Equations",
+    "Coordinate Geometry", "Three Dimensional Geometry", "Vector Algebra",
+    "Statistics & Probability", "Trigonometry",
+  ],
+};
+
+function buildTopicId(subjectId, name, i) {
+  return `${subjectId}-${i}-${name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+}
+
+const ALL_TOPICS = Object.entries(TOPICS).flatMap(([subjectId, names]) =>
+  names.map((name, i) => ({ id: buildTopicId(subjectId, name, i), subjectId, name, order: i }))
+);
+
+/* ============================================================================
+   INSTITUTION DATA
+   Scoped deliberately: this is a single-student app, so there's no
+   teacher/admin/parent portal, role switching, or backend here — just the
+   student-facing slice (timetable, attendance, notices, exams, events,
+   materials) that a real institution would publish. This is seed/mock data,
+   the same way ALL_TOPICS is — in a real backend it'd come from the
+   institution's admin tools, not be edited by the student.
+   ============================================================================ */
+
+const INSTITUTION = {
+  name: "Apex Learning Institute",
+  program: "JEE 2027 Batch",
+  studentClass: "12th",
+  section: "A",
+  rollNumber: "24IIT0142",
+  academicYear: "2026–27",
+};
+
+const PERIOD_TIMES = ["08:00", "09:00", "10:00", "11:15", "12:15", "14:00"];
+
+const TIMETABLE_DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+const TIMETABLE = {
+  Mon: [
+    { time: "08:00", subjectId: "physics", teacher: "Mr. R. Kulkarni", room: "204" },
+    { time: "09:00", subjectId: "mathematics", teacher: "Ms. A. Verma", room: "204" },
+    { time: "10:00", subjectId: "chemistry", teacher: "Dr. S. Iyer", room: "Lab 2" },
+    { time: "11:15", subjectId: "physics", teacher: "Mr. R. Kulkarni", room: "204" },
+    { time: "12:15", type: "break", label: "Lunch Break" },
+    { time: "14:00", type: "doubt", label: "Doubt Clearing — Mathematics" },
+  ],
+  Tue: [
+    { time: "08:00", subjectId: "chemistry", teacher: "Dr. S. Iyer", room: "Lab 2" },
+    { time: "09:00", subjectId: "physics", teacher: "Mr. R. Kulkarni", room: "204" },
+    { time: "10:00", subjectId: "mathematics", teacher: "Ms. A. Verma", room: "204" },
+    { time: "11:15", subjectId: "chemistry", teacher: "Dr. S. Iyer", room: "Lab 2" },
+    { time: "12:15", type: "break", label: "Lunch Break" },
+    { time: "14:00", subjectId: "mathematics", teacher: "Ms. A. Verma", room: "204" },
+  ],
+  Wed: [
+    { time: "08:00", subjectId: "mathematics", teacher: "Ms. A. Verma", room: "204" },
+    { time: "09:00", subjectId: "chemistry", teacher: "Dr. S. Iyer", room: "Lab 2" },
+    { time: "10:00", subjectId: "physics", teacher: "Mr. R. Kulkarni", room: "204" },
+    { time: "11:15", type: "mock", label: "Mock Test — Full Syllabus" },
+    { time: "12:15", type: "break", label: "Lunch Break" },
+    { time: "14:00", subjectId: "physics", teacher: "Mr. R. Kulkarni", room: "204" },
+  ],
+  Thu: [
+    { time: "08:00", subjectId: "physics", teacher: "Mr. R. Kulkarni", room: "204" },
+    { time: "09:00", subjectId: "mathematics", teacher: "Ms. A. Verma", room: "204" },
+    { time: "10:00", subjectId: "chemistry", teacher: "Dr. S. Iyer", room: "Lab 2" },
+    { time: "11:15", subjectId: "mathematics", teacher: "Ms. A. Verma", room: "204" },
+    { time: "12:15", type: "break", label: "Lunch Break" },
+    { time: "14:00", type: "doubt", label: "Doubt Clearing — Physics" },
+  ],
+  Fri: [
+    { time: "08:00", subjectId: "chemistry", teacher: "Dr. S. Iyer", room: "Lab 2" },
+    { time: "09:00", subjectId: "physics", teacher: "Mr. R. Kulkarni", room: "204" },
+    { time: "10:00", subjectId: "mathematics", teacher: "Ms. A. Verma", room: "204" },
+    { time: "11:15", subjectId: "chemistry", teacher: "Dr. S. Iyer", room: "Lab 2" },
+    { time: "12:15", type: "break", label: "Lunch Break" },
+    { time: "14:00", subjectId: "mathematics", teacher: "Ms. A. Verma", room: "204" },
+  ],
+  Sat: [
+    { time: "08:00", type: "mock", label: "Weekly Mock Test" },
+    { time: "09:00", type: "mock", label: "Weekly Mock Test" },
+    { time: "10:00", type: "mock", label: "Weekly Mock Test" },
+    { time: "11:15", type: "doubt", label: "Test Discussion" },
+  ],
+};
+
+// Present/absent/late counts a real backend would compute from daily records.
+const ATTENDANCE_SUMMARY = {
+  physics: { present: 41, absent: 3, late: 1 },
+  chemistry: { present: 38, absent: 5, late: 2 },
+  mathematics: { present: 43, absent: 1, late: 1 },
+};
+
+const ATTENDANCE_TARGET_PCT = 75;
+
+const NOTICES = [
+  {
+    id: "n1", title: "Mathematics Unit Test — Syllabus Confirmed", category: "exam",
+    priority: "high", author: "Ms. A. Verma", date: "2026-08-24",
+    description: "Unit test on Quadratic Equations, Sequences & Series, and Binomial Theorem. No calculators allowed.",
+  },
+  {
+    id: "n2", title: "Lab Records Due Before Chemistry Practical", category: "academic",
+    priority: "medium", author: "Dr. S. Iyer", date: "2026-08-23",
+    description: "Bring completed lab records and practical notebooks to Thursday's Chemistry lab session.",
+  },
+  {
+    id: "n3", title: "Institute Closed — Regional Holiday", category: "holiday",
+    priority: "low", author: "Admin Office", date: "2026-08-22",
+    description: "The institute will remain closed on September 2. Regular classes resume September 3.",
+  },
+  {
+    id: "n4", title: "Fee Payment Reminder — September", category: "fee",
+    priority: "medium", author: "Admin Office", date: "2026-08-21",
+    description: "September fee installment is due by the 5th. Late payments incur a ₹500 fee.",
+  },
+  {
+    id: "n5", title: "Emergency: Saturday Mock Test Rescheduled", category: "emergency",
+    priority: "high", author: "Academic Coordinator", date: "2026-08-20",
+    description: "Saturday's full-syllabus mock test moves from 8:00 AM to 9:30 AM due to a venue conflict.",
+  },
+];
+
+const EXAM_SCHEDULE = [
+  {
+    id: "e1", title: "Mathematics Unit Test", subjectId: "mathematics",
+    date: "2026-09-04", time: "10:00 AM", room: "204", duration: "90 min",
+    syllabus: ["Quadratic Equations", "Sequences & Series", "Binomial Theorem"],
+    status: "upcoming",
+  },
+  {
+    id: "e2", title: "Physics Full Syllabus Mock", subjectId: "physics",
+    date: "2026-09-10", time: "09:00 AM", room: "Hall A", duration: "180 min",
+    syllabus: ["Mechanics", "Thermodynamics", "Electrostatics"],
+    status: "upcoming",
+  },
+  {
+    id: "e3", title: "Chemistry Unit Test", subjectId: "chemistry",
+    date: "2026-08-14", time: "10:00 AM", room: "Lab 2", duration: "60 min",
+    syllabus: ["Chemical Bonding", "States of Matter"],
+    status: "completed", marks: 42, totalMarks: 50,
+  },
+];
+
+const EVENTS = [
+  {
+    id: "ev1", title: "Parent-Teacher Meeting", category: "meeting",
+    date: "2026-09-06", time: "10:00 AM", location: "Main Auditorium",
+    organizer: "Academic Office",
+    description: "Quarterly progress discussion for JEE 2027 batch parents.",
+  },
+  {
+    id: "ev2", title: "Physics Olympiad Prep Workshop", category: "workshop",
+    date: "2026-09-13", time: "02:00 PM", location: "Lab 2",
+    organizer: "Mr. R. Kulkarni",
+    description: "Optional workshop covering advanced mechanics problem-solving.",
+  },
+  {
+    id: "ev3", title: "Annual Sports Day", category: "sports",
+    date: "2026-09-20", time: "08:00 AM", location: "Institute Grounds",
+    organizer: "Student Council",
+    description: "Inter-batch sports competition. Registration at the front desk.",
+  },
+];
+
+const MATERIALS = [
+  {
+    id: "m1", title: "Rotational Motion — Full Notes", subjectId: "physics",
+    teacher: "Mr. R. Kulkarni", type: "pdf", uploadDate: "2026-08-19",
+  },
+  {
+    id: "m2", title: "Chemical Bonding — Lecture Recording", subjectId: "chemistry",
+    teacher: "Dr. S. Iyer", type: "video", uploadDate: "2026-08-18",
+  },
+  {
+    id: "m3", title: "Binomial Theorem — Practice Sheet", subjectId: "mathematics",
+    teacher: "Ms. A. Verma", type: "pdf", uploadDate: "2026-08-17",
+  },
+  {
+    id: "m4", title: "Previous Year JEE Questions — Mechanics", subjectId: "physics",
+    teacher: "Mr. R. Kulkarni", type: "pdf", uploadDate: "2026-08-15",
+  },
+  {
+    id: "m5", title: "NCERT Reference — Equilibrium", subjectId: "chemistry",
+    teacher: "Dr. S. Iyer", type: "link", uploadDate: "2026-08-12",
+  },
+  {
+    id: "m6", title: "Sequences & Series — Solved Examples", subjectId: "mathematics",
+    teacher: "Ms. A. Verma", type: "notes", uploadDate: "2026-08-10",
+  },
+];
+
+const MATERIAL_TYPE_ICON = { pdf: FileText, video: Video, link: Link2, notes: FileText };
+
+const NOTICE_PRIORITY_COLOR = { high: "#F2635C", medium: "#F2A93B", low: "#5B8DEF" };
+
+const STATUS = {
+  not_started: { label: "Not started", weight: 0 },
+  learning: { label: "Learning", weight: 0.33 },
+  practicing: { label: "Practicing", weight: 0.66 },
+  completed: { label: "Completed", weight: 1 },
+};
+
+const STATUS_ORDER = ["not_started", "learning", "practicing", "completed"];
+
+const STATUS_COLOR = {
+  not_started: "#5B6472",
+  learning: "#5B8DEF",
+  practicing: "#F2A93B",
+  completed: "#34C77B",
+};
+
+function nextStatus(current) {
+  const i = STATUS_ORDER.indexOf(current || "not_started");
+  return STATUS_ORDER[(i + 1) % STATUS_ORDER.length];
+}
+
+/* ============================================================================
+   BUSINESS LOGIC (pure functions — no storage, no DOM)
+   ============================================================================ */
+
+function computeSubjectProgress(subjectId, topicStatusMap) {
+  const topics = ALL_TOPICS.filter((t) => t.subjectId === subjectId);
+  if (topics.length === 0) return 0;
+  const total = topics.reduce((sum, t) => {
+    const status = topicStatusMap[t.id] || "not_started";
+    return sum + STATUS[status].weight;
+  }, 0);
+  return Math.round((total / topics.length) * 100);
+}
+
+function computeOverallProgress(topicStatusMap) {
+  const subjectIds = Object.keys(SUBJECTS);
+  const avg =
+    subjectIds.reduce((sum, id) => sum + computeSubjectProgress(id, topicStatusMap), 0) /
+    subjectIds.length;
+  return Math.round(avg);
+}
+
+function minutesFromSessions(sessions, sinceMs) {
+  return sessions
+    .filter((s) => new Date(s.startedAt).getTime() >= sinceMs)
+    .reduce((sum, s) => sum + s.durationSec / 60, 0);
+}
+
+function startOfTodayMs() {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+function startOfWeekMs() {
+  const d = new Date();
+  const day = d.getDay();
+  const diff = (day === 0 ? 6 : day - 1); // week starts Monday
+  d.setDate(d.getDate() - diff);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+function formatMinutes(mins) {
+  const m = Math.round(mins);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  const rem = m % 60;
+  return rem ? `${h}h ${rem}m` : `${h}h`;
+}
+
+// Local (not UTC) YYYY-MM-DD key — used everywhere a task/session needs to be
+// bucketed to "today" so a student in IST doesn't get midnight-UTC bugs.
+function localDateKey(d = new Date()) {
+  const tzOffset = d.getTimezoneOffset() * 60000;
+  return new Date(d.getTime() - tzOffset).toISOString().slice(0, 10);
+}
+
+function computeDailyMinutesMap(sessions) {
+  const map = {};
+  sessions.forEach((s) => {
+    const key = localDateKey(new Date(s.startedAt));
+    map[key] = (map[key] || 0) + s.durationSec / 60;
+  });
+  return map;
+}
+
+// Streak is deliberately *derived* from session history every render rather
+// than incremented and stored — same principle as subject progress being
+// derived from topic status. Today doesn't break a streak until the day is
+// over; it just doesn't count yet.
+function computeStreak(sessions, goalMinutes) {
+  const map = computeDailyMinutesMap(sessions);
+  const isQualifying = (key) => (map[key] || 0) >= goalMinutes;
+
+  let cursor = new Date();
+  if (!isQualifying(localDateKey(cursor))) {
+    cursor = new Date(cursor.getTime() - 86400000);
+  }
+  let current = 0;
+  while (isQualifying(localDateKey(cursor))) {
+    current++;
+    cursor = new Date(cursor.getTime() - 86400000);
+  }
+
+  const qualifyingDates = Object.keys(map).filter(isQualifying).sort();
+  let longest = 0, run = 0, prevDate = null;
+  qualifyingDates.forEach((dStr) => {
+    const d = new Date(dStr + "T00:00:00");
+    if (prevDate) {
+      const diffDays = Math.round((d - prevDate) / 86400000);
+      run = diffDays === 1 ? run + 1 : 1;
+    } else {
+      run = 1;
+    }
+    longest = Math.max(longest, run);
+    prevDate = d;
+  });
+  longest = Math.max(longest, current);
+  return { current, longest };
+}
+
+function lastNDaysStudy(sessions, n) {
+  const map = computeDailyMinutesMap(sessions);
+  const days = [];
+  for (let i = n - 1; i >= 0; i--) {
+    const d = new Date(Date.now() - i * 86400000);
+    const key = localDateKey(d);
+    days.push({ key, label: d.toLocaleDateString(undefined, { weekday: "short" }), minutes: map[key] || 0 });
+  }
+  return days;
+}
+
+function lastNWeeksStudy(sessions, n) {
+  const weeks = [];
+  for (let i = n - 1; i >= 0; i--) {
+    const anchor = new Date(Date.now() - i * 7 * 86400000);
+    const day = anchor.getDay();
+    const diff = day === 0 ? 6 : day - 1;
+    const start = new Date(anchor);
+    start.setDate(start.getDate() - diff);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(start.getTime() + 7 * 86400000);
+    const minutes = sessions
+      .filter((s) => {
+        const t = new Date(s.startedAt).getTime();
+        return t >= start.getTime() && t < end.getTime();
+      })
+      .reduce((sum, s) => sum + s.durationSec / 60, 0);
+    weeks.push({ label: start.toLocaleDateString(undefined, { month: "short", day: "numeric" }), minutes });
+  }
+  return weeks;
+}
+
+/* ============================================================================
+   XP MODULE — kept isolated so the rules can change without touching
+   the timer, the syllabus tracker, or storage.
+   ============================================================================ */
+
+const XP_RULES = {
+  perMinuteStudied: 1,
+  topicCompletedBonus: 25,
+  dailyGoalBonus: 20,
+};
+
+function computeSessionXp(durationSeconds) {
+  return Math.round((durationSeconds / 60) * XP_RULES.perMinuteStudied);
+}
+
+const TIMER_PRESETS = [
+  { id: "25-5", label: "25 / 5", focusMin: 25, breakMin: 5 },
+  { id: "50-10", label: "50 / 10", focusMin: 50, breakMin: 10 },
+  { id: "custom", label: "Custom", focusMin: null, breakMin: null },
+];
+
+function pad2(n) {
+  return String(n).padStart(2, "0");
+}
+
+function formatClock(totalSeconds) {
+  const s = Math.max(0, Math.round(totalSeconds));
+  const m = Math.floor(s / 60);
+  const rem = s % 60;
+  return `${pad2(m)}:${pad2(rem)}`;
+}
+
+/* ============================================================================
+   THEME TOKENS
+   ============================================================================ */
+
+const THEMES = {
+  dark: {
+    bg: "#0F1419",
+    surface: "#171D26",
+    surfaceRaised: "#1E2530",
+    border: "#2A3341",
+    text: "#EDF0F4",
+    textMuted: "#8B95A5",
+    textFaint: "#5B6472",
+  },
+  light: {
+    bg: "#F5F6F8",
+    surface: "#FFFFFF",
+    surfaceRaised: "#FFFFFF",
+    border: "#E2E5EA",
+    text: "#181C22",
+    textMuted: "#5B6472",
+    textFaint: "#8B95A5",
+  },
+};
+
+const ACCENT = "#F2A93B"; // XP / streak accent (warm — late-night lamp)
+const STREAK_ACCENT = "#F2635C";
+
+/* ============================================================================
+   UI PRIMITIVES
+   ============================================================================ */
+
+function StatCard({ icon: Icon, label, value, sub, accent, t }) {
+  return (
+    <div
+      style={{
+        background: t.surface,
+        border: `1px solid ${t.border}`,
+        borderRadius: 14,
+        padding: "18px 20px",
+        display: "flex",
+        flexDirection: "column",
+        gap: 10,
+        minWidth: 0,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 8, color: t.textMuted }}>
+        <Icon size={15} color={accent} strokeWidth={2.25} />
+        <span style={{ fontSize: 12.5, letterSpacing: "0.02em", fontWeight: 500 }}>{label}</span>
+      </div>
+      <div
+        style={{
+          fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
+          fontSize: 28,
+          fontWeight: 600,
+          color: t.text,
+          lineHeight: 1,
+        }}
+      >
+        {value}
+      </div>
+      {sub && (
+        <div style={{ fontSize: 12, color: t.textFaint }}>{sub}</div>
+      )}
+    </div>
+  );
+}
+
+function SubjectRings({ progress, t }) {
+  // Signature element: three concentric arcs, one per subject.
+  const size = 168;
+  const cx = size / 2;
+  const cy = size / 2;
+  const rings = [
+    { id: "physics", r: 74, sw: 10 },
+    { id: "chemistry", r: 58, sw: 10 },
+    { id: "mathematics", r: 42, sw: 10 },
+  ];
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 24, flexWrap: "wrap" }}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+        {rings.map((ring) => {
+          const subject = SUBJECTS[ring.id];
+          const pct = progress[ring.id] ?? 0;
+          const circumference = 2 * Math.PI * ring.r;
+          const dash = (pct / 100) * circumference;
+          return (
+            <g key={ring.id} transform={`rotate(-90 ${cx} ${cy})`}>
+              <circle
+                cx={cx} cy={cy} r={ring.r}
+                fill="none" stroke={t.border} strokeWidth={ring.sw}
+              />
+              <circle
+                cx={cx} cy={cy} r={ring.r}
+                fill="none" stroke={subject.color} strokeWidth={ring.sw}
+                strokeDasharray={`${dash} ${circumference}`}
+                strokeLinecap="round"
+                style={{ transition: "stroke-dasharray 0.6s ease" }}
+              />
+            </g>
+          );
+        })}
+      </svg>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {Object.values(SUBJECTS).map((s) => (
+          <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <span style={{ width: 9, height: 9, borderRadius: "50%", background: s.color, flexShrink: 0 }} />
+            <span style={{ fontSize: 13.5, color: t.text, minWidth: 92 }}>{s.name}</span>
+            <span
+              style={{
+                fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
+                fontSize: 13.5, color: t.textMuted, fontWeight: 500,
+              }}
+            >
+              {progress[s.id] ?? 0}%
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function EmptyState({ title, body, t }) {
+  return (
+    <div
+      style={{
+        border: `1px dashed ${t.border}`,
+        borderRadius: 12,
+        padding: "22px 18px",
+        textAlign: "center",
+        color: t.textMuted,
+      }}
+    >
+      <div style={{ fontSize: 13.5, color: t.text, fontWeight: 600, marginBottom: 4 }}>{title}</div>
+      <div style={{ fontSize: 12.5, lineHeight: 1.5 }}>{body}</div>
+    </div>
+  );
+}
+
+const NAV_ITEMS = [
+  { id: "dashboard", label: "Dashboard", icon: LayoutDashboard, phase: 1 },
+  { id: "institution", label: "Institution", icon: Building2, phase: 0 },
+  { id: "syllabus", label: "Syllabus", icon: BookOpen, phase: 2 },
+  { id: "timer", label: "Timer", icon: TimerIcon, phase: 3 },
+  { id: "plan", label: "Today's Plan", icon: ListChecks, phase: 4 },
+  { id: "progress", label: "Progress", icon: LineChart, phase: 5 },
+  { id: "subscription", label: "Plans & Billing", icon: CreditCard, phase: 0 },
+];
+
+const SUBJECT_FILTERS = [{ id: "all", name: "All subjects" }, ...Object.values(SUBJECTS)];
+const STATUS_FILTERS = [
+  { id: "all", label: "All statuses" },
+  ...STATUS_ORDER.map((id) => ({ id, label: STATUS[id].label })),
+];
+
+/* ---------------------------------------------------------------------------
+   SYLLABUS TRACKER (Phase 2)
+   --------------------------------------------------------------------------- */
+
+function ProgressBar({ pct, color, t, height = 6 }) {
+  return (
+    <div style={{ height, borderRadius: height, background: t.border, overflow: "hidden" }}>
+      <div
+        style={{
+          height: "100%", width: `${pct}%`, background: color,
+          borderRadius: height, transition: "width 0.4s ease",
+        }}
+      />
+    </div>
+  );
+}
+
+function TopicRow({ topic, status, color, onCycle, t }) {
+  const meta = STATUS[status];
+  return (
+    <button
+      onClick={onCycle}
+      title="Click to advance status"
+      style={{
+        display: "flex", alignItems: "center", gap: 12, width: "100%",
+        padding: "10px 12px", borderRadius: 10, border: `1px solid ${t.border}`,
+        background: t.surfaceRaised, cursor: "pointer", textAlign: "left",
+        marginBottom: 6,
+      }}
+    >
+      <span
+        style={{
+          width: 20, height: 20, borderRadius: 6, flexShrink: 0,
+          border: `1.5px solid ${STATUS_COLOR[status]}`,
+          background: status === "completed" ? STATUS_COLOR[status] : "transparent",
+          display: "flex", alignItems: "center", justifyContent: "center",
+        }}
+      >
+        {status === "completed" && <Check size={13} color="#0F1419" strokeWidth={3} />}
+      </span>
+      <span style={{ flex: 1, fontSize: 13.5, color: t.text, minWidth: 0 }}>{topic.name}</span>
+      <span
+        style={{
+          fontSize: 11, fontWeight: 600, letterSpacing: "0.02em",
+          padding: "3px 9px", borderRadius: 999, flexShrink: 0,
+          color: STATUS_COLOR[status],
+          background: `${STATUS_COLOR[status]}1A`,
+        }}
+      >
+        {meta.label}
+      </span>
+    </button>
+  );
+}
+
+function SyllabusView({ topicStatus, onCycleTopic, subjectProgress, overallProgress, t }) {
+  const [query, setQuery] = useState("");
+  const [subjectFilter, setSubjectFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
+
+  const filteredTopics = useMemo(() => {
+    return ALL_TOPICS.filter((topic) => {
+      if (subjectFilter !== "all" && topic.subjectId !== subjectFilter) return false;
+      const status = topicStatus[topic.id] || "not_started";
+      if (statusFilter !== "all" && status !== statusFilter) return false;
+      if (query.trim() && !topic.name.toLowerCase().includes(query.trim().toLowerCase())) return false;
+      return true;
+    });
+  }, [query, subjectFilter, statusFilter, topicStatus]);
+
+  const groupedBySubject = useMemo(() => {
+    const groups = {};
+    filteredTopics.forEach((topic) => {
+      groups[topic.subjectId] = groups[topic.subjectId] || [];
+      groups[topic.subjectId].push(topic);
+    });
+    return groups;
+  }, [filteredTopics]);
+
+  const subjectsToShow =
+    subjectFilter === "all" ? Object.keys(SUBJECTS) : [subjectFilter];
+
+  return (
+    <div>
+      <div style={{ marginBottom: 18 }}>
+        <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 20, fontWeight: 700 }}>
+          JEE Syllabus
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8 }}>
+          <div style={{ flex: 1, maxWidth: 260 }}>
+            <ProgressBar pct={overallProgress} color={ACCENT} t={t} height={7} />
+          </div>
+          <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 12.5, color: t.textMuted }}>
+            {overallProgress}% overall · {ALL_TOPICS.length} topics
+          </span>
+        </div>
+      </div>
+
+      {/* Search + filters */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+        <div
+          style={{
+            display: "flex", alignItems: "center", gap: 8, flex: 1, minWidth: 180,
+            background: t.surface, border: `1px solid ${t.border}`, borderRadius: 9,
+            padding: "8px 12px",
+          }}
+        >
+          <Search size={14} color={t.textFaint} />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search topics…"
+            style={{
+              border: "none", outline: "none", background: "transparent",
+              color: t.text, fontSize: 13, flex: 1, fontFamily: "inherit",
+            }}
+          />
+          {query && (
+            <button
+              onClick={() => setQuery("")}
+              style={{ border: "none", background: "transparent", cursor: "pointer", display: "flex" }}
+            >
+              <X size={13} color={t.textFaint} />
+            </button>
+          )}
+        </div>
+
+        <select
+          value={subjectFilter}
+          onChange={(e) => setSubjectFilter(e.target.value)}
+          style={{
+            background: t.surface, border: `1px solid ${t.border}`, borderRadius: 9,
+            padding: "8px 10px", color: t.text, fontSize: 13, fontFamily: "inherit",
+          }}
+        >
+          {SUBJECT_FILTERS.map((s) => (
+            <option key={s.id} value={s.id}>{s.name}</option>
+          ))}
+        </select>
+
+        <select
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+          style={{
+            background: t.surface, border: `1px solid ${t.border}`, borderRadius: 9,
+            padding: "8px 10px", color: t.text, fontSize: 13, fontFamily: "inherit",
+          }}
+        >
+          {STATUS_FILTERS.map((s) => (
+            <option key={s.id} value={s.id}>{s.label}</option>
+          ))}
+        </select>
+      </div>
+
+      {filteredTopics.length === 0 ? (
+        <EmptyState
+          title="No topics match"
+          body="Try clearing the search or filters — every JEE topic is loaded, so this is a filter dead-end, not missing data."
+          t={t}
+        />
+      ) : (
+        subjectsToShow.map((subjectId) => {
+          const topics = groupedBySubject[subjectId];
+          if (!topics || topics.length === 0) return null;
+          const subject = SUBJECTS[subjectId];
+          return (
+            <div key={subjectId} style={{ marginBottom: 22 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                <span style={{ width: 9, height: 9, borderRadius: "50%", background: subject.color, flexShrink: 0 }} />
+                <span style={{ fontSize: 14, fontWeight: 600 }}>{subject.name}</span>
+                <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, color: t.textMuted }}>
+                  {subjectProgress[subjectId]}%
+                </span>
+                <div style={{ flex: 1, maxWidth: 140 }}>
+                  <ProgressBar pct={subjectProgress[subjectId]} color={subject.color} t={t} />
+                </div>
+              </div>
+              {topics.map((topic) => (
+                <TopicRow
+                  key={topic.id}
+                  topic={topic}
+                  status={topicStatus[topic.id] || "not_started"}
+                  color={subject.color}
+                  onCycle={() => onCycleTopic(topic.id)}
+                  t={t}
+                />
+              ))}
+            </div>
+          );
+        })
+      )}
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------------------
+   STUDY TIMER (Phase 3)
+   --------------------------------------------------------------------------- */
+
+function TimerView({ onCompleteSession, t }) {
+  const [presetId, setPresetId] = useState("25-5");
+  const [customMinutes, setCustomMinutes] = useState(30);
+  const [subjectId, setSubjectId] = useState("physics");
+  const [topicId, setTopicId] = useState(ALL_TOPICS.find((x) => x.subjectId === "physics").id);
+
+  const focusMinutes = useMemo(() => {
+    const preset = TIMER_PRESETS.find((p) => p.id === presetId);
+    return preset.focusMin ?? customMinutes;
+  }, [presetId, customMinutes]);
+
+  const totalSeconds = focusMinutes * 60;
+
+  const [status, setStatus] = useState("idle"); // idle | running | paused | done
+  const [remaining, setRemaining] = useState(totalSeconds);
+  const [elapsedAtPause, setElapsedAtPause] = useState(0);
+  const [justSaved, setJustSaved] = useState(false);
+
+  // Reset the clock whenever duration changes while idle.
+  useEffect(() => {
+    if (status === "idle") {
+      setRemaining(totalSeconds);
+      setElapsedAtPause(0);
+    }
+  }, [totalSeconds, status]);
+
+  useEffect(() => {
+    if (status !== "running") return;
+    const interval = setInterval(() => {
+      setRemaining((prev) => {
+        if (prev <= 1) {
+          clearInterval(interval);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [status]);
+
+  useEffect(() => {
+    if (status === "running" && remaining === 0) {
+      finishSession(totalSeconds);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [remaining, status]);
+
+  const topicsForSubject = ALL_TOPICS.filter((tp) => tp.subjectId === subjectId);
+
+  function finishSession(elapsedSeconds) {
+    if (elapsedSeconds >= 60) {
+      const session = {
+        id: `session-${Date.now()}`,
+        subjectId,
+        topicId,
+        durationSec: elapsedSeconds,
+        startedAt: new Date(Date.now() - elapsedSeconds * 1000).toISOString(),
+        endedAt: new Date().toISOString(),
+        xpEarned: computeSessionXp(elapsedSeconds),
+      };
+      onCompleteSession(session);
+      setJustSaved(true);
+      setTimeout(() => setJustSaved(false), 2500);
+    }
+    setStatus("idle");
+    setRemaining(totalSeconds);
+    setElapsedAtPause(0);
+  }
+
+  function handleStart() {
+    setStatus("running");
+  }
+  function handlePause() {
+    setStatus("paused");
+    setElapsedAtPause(totalSeconds - remaining);
+  }
+  function handleResume() {
+    setStatus("running");
+  }
+  function handleStop() {
+    const elapsed = totalSeconds - remaining;
+    finishSession(elapsed);
+  }
+  function handleReset() {
+    setStatus("idle");
+    setRemaining(totalSeconds);
+    setElapsedAtPause(0);
+  }
+
+  const pct = Math.round(((totalSeconds - remaining) / totalSeconds) * 100);
+  const circumference = 2 * Math.PI * 90;
+  const dash = (pct / 100) * circumference;
+  const running = status === "running";
+  const paused = status === "paused";
+  const idle = status === "idle";
+
+  return (
+    <div style={{ maxWidth: 620 }}>
+      <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 20, fontWeight: 700, marginBottom: 4 }}>
+        Focus Timer
+      </div>
+      <div style={{ fontSize: 13, color: t.textMuted, marginBottom: 20 }}>
+        Sessions save automatically once you cross a minute — subject, topic, duration and XP are logged.
+      </div>
+
+      <div style={{ display: "flex", gap: 24, flexWrap: "wrap", alignItems: "flex-start" }}>
+        {/* Dial */}
+        <div style={{ position: "relative", width: 200, height: 200, flexShrink: 0 }}>
+          <svg width={200} height={200} viewBox="0 0 200 200">
+            <g transform="rotate(-90 100 100)">
+              <circle cx={100} cy={100} r={90} fill="none" stroke={t.border} strokeWidth={10} />
+              <circle
+                cx={100} cy={100} r={90} fill="none"
+                stroke={SUBJECTS[subjectId].color} strokeWidth={10}
+                strokeDasharray={`${dash} ${circumference}`} strokeLinecap="round"
+                style={{ transition: "stroke-dasharray 0.4s linear" }}
+              />
+            </g>
+          </svg>
+          <div
+            style={{
+              position: "absolute", inset: 0, display: "flex", flexDirection: "column",
+              alignItems: "center", justifyContent: "center",
+            }}
+          >
+            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 32, fontWeight: 600, color: t.text }}>
+              {formatClock(remaining)}
+            </div>
+            <div style={{ fontSize: 11.5, color: t.textFaint, marginTop: 2, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+              {idle ? "Ready" : running ? "Focusing" : paused ? "Paused" : "Done"}
+            </div>
+          </div>
+        </div>
+
+        {/* Controls + config */}
+        <div style={{ flex: 1, minWidth: 240 }}>
+          <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+            {idle ? (
+              <TimerButton label="Start" primary onClick={handleStart} t={t} />
+            ) : running ? (
+              <>
+                <TimerButton label="Pause" onClick={handlePause} t={t} />
+                <TimerButton label="Stop" onClick={handleStop} t={t} />
+              </>
+            ) : (
+              <>
+                <TimerButton label="Resume" primary onClick={handleResume} t={t} />
+                <TimerButton label="Stop" onClick={handleStop} t={t} />
+              </>
+            )}
+            <TimerButton label="Reset" onClick={handleReset} t={t} />
+          </div>
+
+          {justSaved && (
+            <div style={{ fontSize: 12, color: "#34C77B", marginBottom: 12, fontWeight: 600 }}>
+              Session saved ✓
+            </div>
+          )}
+
+          <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap" }}>
+            {TIMER_PRESETS.map((p) => (
+              <button
+                key={p.id}
+                disabled={!idle}
+                onClick={() => setPresetId(p.id)}
+                style={{
+                  padding: "6px 12px", borderRadius: 999, fontSize: 12.5, fontWeight: 600,
+                  border: `1px solid ${presetId === p.id ? ACCENT : t.border}`,
+                  background: presetId === p.id ? `${ACCENT}1A` : t.surface,
+                  color: presetId === p.id ? ACCENT : t.textMuted,
+                  cursor: idle ? "pointer" : "not-allowed", opacity: idle ? 1 : 0.6,
+                }}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+
+          {presetId === "custom" && (
+            <div style={{ marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 12.5, color: t.textMuted }}>Duration</span>
+              <input
+                type="number" min={1} max={180} disabled={!idle}
+                value={customMinutes}
+                onChange={(e) => setCustomMinutes(Math.max(1, Number(e.target.value) || 1))}
+                style={{
+                  width: 64, padding: "6px 8px", borderRadius: 7,
+                  border: `1px solid ${t.border}`, background: t.surface, color: t.text, fontSize: 13,
+                }}
+              />
+              <span style={{ fontSize: 12.5, color: t.textFaint }}>min</span>
+            </div>
+          )}
+
+          <div style={{ display: "flex", gap: 8 }}>
+            <select
+              value={subjectId} disabled={!idle}
+              onChange={(e) => {
+                setSubjectId(e.target.value);
+                setTopicId(ALL_TOPICS.find((x) => x.subjectId === e.target.value).id);
+              }}
+              style={{
+                flex: 1, background: t.surface, border: `1px solid ${t.border}`, borderRadius: 9,
+                padding: "8px 10px", color: t.text, fontSize: 13, fontFamily: "inherit",
+              }}
+            >
+              {Object.values(SUBJECTS).map((s) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
+            <select
+              value={topicId} disabled={!idle}
+              onChange={(e) => setTopicId(e.target.value)}
+              style={{
+                flex: 1.4, background: t.surface, border: `1px solid ${t.border}`, borderRadius: 9,
+                padding: "8px 10px", color: t.text, fontSize: 13, fontFamily: "inherit",
+              }}
+            >
+              {topicsForSubject.map((tp) => (
+                <option key={tp.id} value={tp.id}>{tp.name}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TimerButton({ label, onClick, primary, t }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        padding: "9px 16px", borderRadius: 9, fontSize: 13, fontWeight: 600,
+        border: primary ? "none" : `1px solid ${t.border}`,
+        background: primary ? ACCENT : t.surface,
+        color: primary ? "#0F1419" : t.text,
+        cursor: "pointer",
+      }}
+    >
+      {label}
+    </button>
+  );
+}
+
+/* ---------------------------------------------------------------------------
+   TODAY'S PLAN + STREAKS (Phase 4)
+   --------------------------------------------------------------------------- */
+
+const PRIORITIES = [
+  { id: "high", label: "High", color: "#F2635C" },
+  { id: "medium", label: "Medium", color: "#F2A93B" },
+  { id: "low", label: "Low", color: "#5B8DEF" },
+];
+const PRIORITY_COLOR = Object.fromEntries(PRIORITIES.map((p) => [p.id, p.color]));
+const PRIORITY_ORDER = { high: 0, medium: 1, low: 2 };
+
+function TaskRow({ task, onToggle, onDelete, t }) {
+  const subject = SUBJECTS[task.subjectId];
+  const topic = ALL_TOPICS.find((tp) => tp.id === task.topicId);
+  const done = task.status === "done";
+  return (
+    <div
+      style={{
+        display: "flex", alignItems: "center", gap: 10, padding: "10px 12px",
+        borderRadius: 10, border: `1px solid ${t.border}`, background: t.surfaceRaised,
+        marginBottom: 6, opacity: done ? 0.6 : 1,
+      }}
+    >
+      <button
+        onClick={() => onToggle(task.id)}
+        aria-label="Toggle done"
+        style={{
+          width: 20, height: 20, borderRadius: 6, flexShrink: 0, cursor: "pointer",
+          border: `1.5px solid ${done ? "#34C77B" : t.border}`,
+          background: done ? "#34C77B" : "transparent",
+          display: "flex", alignItems: "center", justifyContent: "center",
+        }}
+      >
+        {done && <Check size={13} color="#0F1419" strokeWidth={3} />}
+      </button>
+      <span style={{ width: 8, height: 8, borderRadius: "50%", background: subject.color, flexShrink: 0 }} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div
+          style={{
+            fontSize: 13.5, color: t.text, fontWeight: 500,
+            textDecoration: done ? "line-through" : "none",
+          }}
+        >
+          {topic ? topic.name : subject.name}
+        </div>
+        <div style={{ fontSize: 11, color: t.textFaint }}>
+          {subject.name} · {task.estMinutes} min
+        </div>
+      </div>
+      <span
+        style={{
+          fontSize: 10.5, fontWeight: 600, padding: "3px 8px", borderRadius: 999, flexShrink: 0,
+          color: PRIORITY_COLOR[task.priority], background: `${PRIORITY_COLOR[task.priority]}1A`,
+        }}
+      >
+        {PRIORITIES.find((p) => p.id === task.priority).label}
+      </span>
+      <button
+        onClick={() => onDelete(task.id)}
+        aria-label="Delete task"
+        style={{ border: "none", background: "transparent", cursor: "pointer", display: "flex", flexShrink: 0, color: t.textFaint }}
+      >
+        <X size={14} />
+      </button>
+    </div>
+  );
+}
+
+function AddTaskForm({ onAdd, t }) {
+  const [subjectId, setSubjectId] = useState("physics");
+  const [topicId, setTopicId] = useState(ALL_TOPICS.find((x) => x.subjectId === "physics").id);
+  const [estMinutes, setEstMinutes] = useState(30);
+  const [priority, setPriority] = useState("medium");
+  const topicsForSubject = ALL_TOPICS.filter((tp) => tp.subjectId === subjectId);
+
+  function handleSubmit(e) {
+    e.preventDefault();
+    onAdd({ subjectId, topicId, estMinutes: Math.max(5, Number(estMinutes) || 5), priority });
+  }
+
+  return (
+    <form
+      onSubmit={handleSubmit}
+      style={{
+        display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center",
+        background: t.surface, border: `1px solid ${t.border}`, borderRadius: 12, padding: 14, marginBottom: 16,
+      }}
+    >
+      <select
+        value={subjectId}
+        onChange={(e) => {
+          setSubjectId(e.target.value);
+          setTopicId(ALL_TOPICS.find((x) => x.subjectId === e.target.value).id);
+        }}
+        style={{
+          background: t.surfaceRaised, border: `1px solid ${t.border}`, borderRadius: 9,
+          padding: "8px 10px", color: t.text, fontSize: 13, fontFamily: "inherit",
+        }}
+      >
+        {Object.values(SUBJECTS).map((s) => (
+          <option key={s.id} value={s.id}>{s.name}</option>
+        ))}
+      </select>
+      <select
+        value={topicId}
+        onChange={(e) => setTopicId(e.target.value)}
+        style={{
+          flex: 1, minWidth: 160, background: t.surfaceRaised, border: `1px solid ${t.border}`, borderRadius: 9,
+          padding: "8px 10px", color: t.text, fontSize: 13, fontFamily: "inherit",
+        }}
+      >
+        {topicsForSubject.map((tp) => (
+          <option key={tp.id} value={tp.id}>{tp.name}</option>
+        ))}
+      </select>
+      <input
+        type="number" min={5} max={300} value={estMinutes}
+        onChange={(e) => setEstMinutes(e.target.value)}
+        style={{
+          width: 66, background: t.surfaceRaised, border: `1px solid ${t.border}`, borderRadius: 9,
+          padding: "8px 8px", color: t.text, fontSize: 13,
+        }}
+      />
+      <select
+        value={priority}
+        onChange={(e) => setPriority(e.target.value)}
+        style={{
+          background: t.surfaceRaised, border: `1px solid ${t.border}`, borderRadius: 9,
+          padding: "8px 10px", color: t.text, fontSize: 13, fontFamily: "inherit",
+        }}
+      >
+        {PRIORITIES.map((p) => (
+          <option key={p.id} value={p.id}>{p.label} priority</option>
+        ))}
+      </select>
+      <button
+        type="submit"
+        style={{
+          padding: "8px 14px", borderRadius: 9, fontSize: 13, fontWeight: 600,
+          border: "none", background: ACCENT, color: "#0F1419", cursor: "pointer",
+        }}
+      >
+        Add task
+      </button>
+    </form>
+  );
+}
+
+function PlanView({ tasks, onAddTask, onToggleTask, onDeleteTask, dailyGoalMinutes, onUpdateGoal, todayMinutes, t }) {
+  const [goalDraft, setGoalDraft] = useState(dailyGoalMinutes);
+  const sorted = [...tasks].sort((a, b) => PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority]);
+  const doneCount = tasks.filter((tk) => tk.status === "done").length;
+  const goalPct = Math.min(100, Math.round((todayMinutes / dailyGoalMinutes) * 100));
+
+  return (
+    <div style={{ maxWidth: 680 }}>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 16, gap: 12, flexWrap: "wrap" }}>
+        <div>
+          <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 20, fontWeight: 700 }}>
+            Today's Plan
+          </div>
+          <div style={{ fontSize: 12.5, color: t.textMuted, marginTop: 2 }}>
+            {tasks.length === 0 ? "Nothing planned yet." : `${doneCount} of ${tasks.length} tasks done.`}
+          </div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 12, color: t.textMuted }}>Daily goal</span>
+          <input
+            type="number" min={15} max={600} value={goalDraft}
+            onChange={(e) => setGoalDraft(e.target.value)}
+            onBlur={() => onUpdateGoal(Math.max(15, Number(goalDraft) || 15))}
+            style={{
+              width: 60, background: t.surface, border: `1px solid ${t.border}`, borderRadius: 8,
+              padding: "6px 8px", color: t.text, fontSize: 12.5,
+            }}
+          />
+          <span style={{ fontSize: 12, color: t.textFaint }}>min</span>
+        </div>
+      </div>
+
+      <div style={{ background: t.surface, border: `1px solid ${t.border}`, borderRadius: 12, padding: 14, marginBottom: 16 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8, fontSize: 12.5 }}>
+          <span style={{ color: t.textMuted }}>Today's study time vs. goal</span>
+          <span style={{ fontFamily: "'IBM Plex Mono', monospace", color: t.text }}>
+            {formatMinutes(todayMinutes)} / {formatMinutes(dailyGoalMinutes)}
+          </span>
+        </div>
+        <ProgressBar pct={goalPct} color={goalPct >= 100 ? "#34C77B" : ACCENT} t={t} height={7} />
+      </div>
+
+      <AddTaskForm onAdd={onAddTask} t={t} />
+
+      {sorted.length === 0 ? (
+        <EmptyState title="No tasks yet" body="Add a subject and topic above to plan your study session for today." t={t} />
+      ) : (
+        sorted.map((task) => (
+          <TaskRow key={task.id} task={task} onToggle={onToggleTask} onDelete={onDeleteTask} t={t} />
+        ))
+      )}
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------------------
+   PROGRESS / ANALYTICS (Phase 5)
+   --------------------------------------------------------------------------- */
+
+function BarChartMini({ data, t, color, height = 110 }) {
+  const max = Math.max(1, ...data.map((d) => d.minutes));
+  return (
+    <div style={{ display: "flex", alignItems: "flex-end", gap: 8, height, paddingTop: 8 }}>
+      {data.map((d) => {
+        const barHeight = Math.max(3, Math.round((d.minutes / max) * (height - 24)));
+        return (
+          <div key={d.label} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
+            <div
+              title={`${Math.round(d.minutes)} min`}
+              style={{
+                width: "100%", maxWidth: 26, height: barHeight, borderRadius: 5,
+                background: d.minutes > 0 ? color : t.border,
+                transition: "height 0.4s ease",
+              }}
+            />
+            <span style={{ fontSize: 10, color: t.textFaint, whiteSpace: "nowrap" }}>{d.label}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function ProgressView({ subjectProgress, overallProgress, topicStatus, sessions, xp, streak, t }) {
+  const completedTopics = ALL_TOPICS.filter((tp) => topicStatus[tp.id] === "completed").length;
+  const dailyData = useMemo(() => lastNDaysStudy(sessions, 7), [sessions]);
+  const weeklyData = useMemo(() => lastNWeeksStudy(sessions, 6), [sessions]);
+
+  return (
+    <div>
+      <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 20, fontWeight: 700, marginBottom: 16 }}>
+        Progress
+      </div>
+
+      <div
+        style={{
+          display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+          gap: 12, marginBottom: 20,
+        }}
+      >
+        <StatCard icon={LineChart} label="Overall" value={`${overallProgress}%`} sub="syllabus covered" accent={ACCENT} t={t} />
+        <StatCard icon={BookOpen} label="Topics" value={completedTopics} sub={`of ${ALL_TOPICS.length} completed`} accent={ACCENT} t={t} />
+        <StatCard icon={Flame} label="Streak" value={streak.current} sub={`best: ${streak.longest}`} accent={STREAK_ACCENT} t={t} />
+        <StatCard icon={Zap} label="XP" value={xp} sub="total earned" accent={ACCENT} t={t} />
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(260px, 1fr) minmax(260px, 1fr)", gap: 14, marginBottom: 14 }}>
+        <div style={{ background: t.surface, border: `1px solid ${t.border}`, borderRadius: 14, padding: 20 }}>
+          <div style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 16 }}>Subject completion</div>
+          <SubjectRings progress={subjectProgress} t={t} />
+        </div>
+
+        <div style={{ background: t.surface, border: `1px solid ${t.border}`, borderRadius: 14, padding: 20 }}>
+          <div style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 4 }}>Study hours — last 7 days</div>
+          <BarChartMini data={dailyData} color={ACCENT} t={t} />
+        </div>
+      </div>
+
+      <div style={{ background: t.surface, border: `1px solid ${t.border}`, borderRadius: 14, padding: 20 }}>
+        <div style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 4 }}>Study hours — last 6 weeks</div>
+        <BarChartMini data={weeklyData} color="#5B8DEF" t={t} height={130} />
+      </div>
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------------------
+   INSTITUTION DASHBOARD
+   Scope note: this is the student-facing slice of what InnovationOS's spec
+   described (timetable, attendance, notices, exams, events, materials) —
+   built to fit this app's single-student, storage-backed architecture.
+   Role switching, teacher/admin/parent portals, messaging, community, and a
+   separate backend are a different, much larger product and aren't part of
+   this MVP.
+   --------------------------------------------------------------------------- */
+
+function formatDateLabel(dateStr) {
+  const d = new Date(dateStr + "T00:00:00");
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+}
+
+function daysUntil(dateStr) {
+  const target = new Date(dateStr + "T00:00:00").getTime();
+  const today = startOfTodayMs();
+  return Math.round((target - today) / 86400000);
+}
+
+function getTodayKey() {
+  const idx = new Date().getDay(); // 0 = Sun
+  const map = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const key = map[idx];
+  return TIMETABLE_DAYS.includes(key) ? key : null;
+}
+
+function getNextClass() {
+  const todayKey = getTodayKey();
+  const nowLabel = `${pad2(new Date().getHours())}:${pad2(new Date().getMinutes())}`;
+  if (todayKey) {
+    const upcoming = (TIMETABLE[todayKey] || []).find((p) => p.time > nowLabel);
+    if (upcoming) return { ...upcoming, day: "Today" };
+  }
+  // fall through to the next day in the week that has periods
+  const startIdx = TIMETABLE_DAYS.indexOf(todayKey) + 1;
+  for (let i = 0; i < TIMETABLE_DAYS.length; i++) {
+    const day = TIMETABLE_DAYS[(startIdx + i) % TIMETABLE_DAYS.length];
+    const periods = TIMETABLE[day] || [];
+    if (periods.length > 0) return { ...periods[0], day };
+  }
+  return null;
+}
+
+function periodLabel(period) {
+  if (period.type === "break") return period.label;
+  if (period.type === "mock") return period.label;
+  if (period.type === "doubt") return period.label;
+  return SUBJECTS[period.subjectId]?.name || "Class";
+}
+
+function SegmentedTabs({ options, value, onChange, t }) {
+  return (
+    <div style={{ display: "flex", gap: 4, marginBottom: 18, flexWrap: "wrap" }}>
+      {options.map((opt) => {
+        const active = value === opt.id;
+        return (
+          <button
+            key={opt.id}
+            onClick={() => onChange(opt.id)}
+            style={{
+              padding: "7px 13px", borderRadius: 8, fontSize: 12.5, fontWeight: 600,
+              border: `1px solid ${active ? t.text : t.border}`,
+              background: active ? t.text : "transparent",
+              color: active ? t.bg : t.textMuted,
+              cursor: "pointer",
+            }}
+          >
+            {opt.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function InstitutionOverview({ readNoticeIds, t }) {
+  const nextClass = useMemo(() => getNextClass(), []);
+  const unreadCount = NOTICES.filter((n) => !readNoticeIds.includes(n.id)).length;
+  const nextExam = useMemo(
+    () => [...EXAM_SCHEDULE].filter((e) => e.status === "upcoming").sort((a, b) => new Date(a.date) - new Date(b.date))[0],
+    []
+  );
+  const overallAttendancePct = useMemo(() => {
+    const totals = Object.values(ATTENDANCE_SUMMARY).reduce(
+      (acc, s) => ({ present: acc.present + s.present, total: acc.total + s.present + s.absent + s.late }),
+      { present: 0, total: 0 }
+    );
+    return Math.round((totals.present / totals.total) * 100);
+  }, []);
+
+  return (
+    <div>
+      <div
+        style={{
+          display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+          gap: 12, marginBottom: 20,
+        }}
+      >
+        <StatCard
+          icon={Clock} label="Next class"
+          value={nextClass ? periodLabel(nextClass) : "—"}
+          sub={nextClass ? `${nextClass.day} · ${nextClass.time}` : "Nothing scheduled"}
+          accent={ACCENT} t={t}
+        />
+        <StatCard
+          icon={Users} label="Attendance"
+          value={`${overallAttendancePct}%`}
+          sub={overallAttendancePct < ATTENDANCE_TARGET_PCT ? "below target" : "on track"}
+          accent={overallAttendancePct < ATTENDANCE_TARGET_PCT ? STREAK_ACCENT : "#34C77B"} t={t}
+        />
+        <StatCard
+          icon={GraduationCap} label="Next exam"
+          value={nextExam ? nextExam.subjectId && SUBJECTS[nextExam.subjectId].name : "—"}
+          sub={nextExam ? `in ${daysUntil(nextExam.date)} days` : "None scheduled"}
+          accent={ACCENT} t={t}
+        />
+        <StatCard
+          icon={Bell} label="Notices" value={unreadCount}
+          sub={unreadCount > 0 ? "unread" : "all caught up"}
+          accent={unreadCount > 0 ? "#F2635C" : "#34C77B"} t={t}
+        />
+      </div>
+
+      <div style={{ background: t.surface, border: `1px solid ${t.border}`, borderRadius: 14, padding: 18, marginBottom: 14 }}>
+        <div style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 12 }}>What needs your attention</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {overallAttendancePct < ATTENDANCE_TARGET_PCT && (
+            <AttentionRow icon={AlertCircle} color="#F2635C" t={t}>
+              Attendance is at {overallAttendancePct}%, below your {ATTENDANCE_TARGET_PCT}% target.
+            </AttentionRow>
+          )}
+          {nextExam && daysUntil(nextExam.date) <= 7 && (
+            <AttentionRow icon={GraduationCap} color={ACCENT} t={t}>
+              {nextExam.title} is in {daysUntil(nextExam.date)} days — syllabus: {nextExam.syllabus.join(", ")}.
+            </AttentionRow>
+          )}
+          {unreadCount > 0 && (
+            <AttentionRow icon={Bell} color="#5B8DEF" t={t}>
+              {unreadCount} unread {unreadCount === 1 ? "notice" : "notices"} from the institute.
+            </AttentionRow>
+          )}
+          {overallAttendancePct >= ATTENDANCE_TARGET_PCT && (!nextExam || daysUntil(nextExam.date) > 7) && unreadCount === 0 && (
+            <div style={{ fontSize: 12.5, color: t.textMuted }}>Nothing urgent — you're all caught up.</div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AttentionRow({ icon: Icon, color, t, children }) {
+  return (
+    <div style={{ display: "flex", alignItems: "flex-start", gap: 9 }}>
+      <Icon size={15} color={color} style={{ marginTop: 1, flexShrink: 0 }} />
+      <span style={{ fontSize: 12.5, color: t.text, lineHeight: 1.5 }}>{children}</span>
+    </div>
+  );
+}
+
+function InstitutionTimetable({ t }) {
+  const todayKey = getTodayKey();
+  const nowLabel = `${pad2(new Date().getHours())}:${pad2(new Date().getMinutes())}`;
+
+  return (
+    <div style={{ overflowX: "auto" }}>
+      <div style={{ display: "flex", gap: 10, minWidth: 720 }}>
+        {TIMETABLE_DAYS.map((day) => {
+          const isToday = day === todayKey;
+          const periods = TIMETABLE[day] || [];
+          return (
+            <div key={day} style={{ flex: 1, minWidth: 108 }}>
+              <div
+                style={{
+                  fontSize: 12, fontWeight: 700, marginBottom: 8, textAlign: "center",
+                  padding: "5px 0", borderRadius: 7,
+                  background: isToday ? `${ACCENT}1A` : "transparent",
+                  color: isToday ? ACCENT : t.textMuted,
+                }}
+              >
+                {day}
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {periods.map((p, i) => {
+                  const isCurrent = isToday && p.time <= nowLabel &&
+                    (periods[i + 1] ? periods[i + 1].time > nowLabel : true) &&
+                    p.time !== undefined;
+                  const subject = p.subjectId ? SUBJECTS[p.subjectId] : null;
+                  return (
+                    <div
+                      key={i}
+                      style={{
+                        background: isCurrent ? `${subject ? subject.color : ACCENT}1A` : t.surface,
+                        border: `1px solid ${isCurrent ? (subject ? subject.color : ACCENT) : t.border}`,
+                        borderRadius: 8, padding: "7px 8px",
+                      }}
+                    >
+                      <div style={{ fontSize: 10, color: t.textFaint, fontFamily: "'IBM Plex Mono', monospace" }}>
+                        {p.time}
+                      </div>
+                      <div style={{ fontSize: 11.5, fontWeight: 600, color: subject ? subject.color : t.textMuted, marginTop: 2 }}>
+                        {periodLabel(p)}
+                      </div>
+                      {p.room && (
+                        <div style={{ fontSize: 10, color: t.textFaint, marginTop: 1 }}>Room {p.room}</div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function InstitutionAttendance({ t }) {
+  const rows = Object.entries(ATTENDANCE_SUMMARY).map(([subjectId, s]) => {
+    const total = s.present + s.absent + s.late;
+    const pct = Math.round((s.present / total) * 100);
+    return { subjectId, ...s, total, pct };
+  });
+  const overall = Math.round(
+    (rows.reduce((sum, r) => sum + r.present, 0) / rows.reduce((sum, r) => sum + r.total, 0)) * 100
+  );
+
+  return (
+    <div>
+      <div style={{ background: t.surface, border: `1px solid ${t.border}`, borderRadius: 14, padding: 20, marginBottom: 14 }}>
+        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 10 }}>
+          <span style={{ fontSize: 13.5, fontWeight: 600 }}>Overall attendance</span>
+          <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 22, fontWeight: 700, color: overall < ATTENDANCE_TARGET_PCT ? STREAK_ACCENT : "#34C77B" }}>
+            {overall}%
+          </span>
+        </div>
+        <ProgressBar pct={overall} color={overall < ATTENDANCE_TARGET_PCT ? STREAK_ACCENT : "#34C77B"} t={t} height={8} />
+        {overall < ATTENDANCE_TARGET_PCT && (
+          <div style={{ fontSize: 12, color: STREAK_ACCENT, marginTop: 8 }}>
+            Below your {ATTENDANCE_TARGET_PCT}% target.
+          </div>
+        )}
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {rows.map((r) => {
+          const subject = SUBJECTS[r.subjectId];
+          return (
+            <div key={r.subjectId} style={{ background: t.surface, border: `1px solid ${t.border}`, borderRadius: 12, padding: 14 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ width: 8, height: 8, borderRadius: "50%", background: subject.color }} />
+                  <span style={{ fontSize: 13.5, fontWeight: 600 }}>{subject.name}</span>
+                </div>
+                <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 13.5, color: r.pct < ATTENDANCE_TARGET_PCT ? STREAK_ACCENT : t.text }}>
+                  {r.pct}%
+                </span>
+              </div>
+              <ProgressBar pct={r.pct} color={subject.color} t={t} />
+              <div style={{ display: "flex", gap: 14, marginTop: 8, fontSize: 11.5, color: t.textMuted }}>
+                <span>Present: {r.present}</span>
+                <span>Absent: {r.absent}</span>
+                <span>Late: {r.late}</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function NoticeCard({ notice, isRead, onMarkRead, t }) {
+  return (
+    <div
+      style={{
+        background: t.surface, border: `1px solid ${t.border}`, borderRadius: 12, padding: 15,
+        marginBottom: 8, opacity: isRead ? 0.65 : 1,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+            <span
+              style={{
+                width: 6, height: 6, borderRadius: "50%", flexShrink: 0,
+                background: NOTICE_PRIORITY_COLOR[notice.priority],
+              }}
+            />
+            <span style={{ fontSize: 13.5, fontWeight: 600, color: t.text }}>{notice.title}</span>
+          </div>
+          <div style={{ fontSize: 12, color: t.textMuted, lineHeight: 1.5, marginBottom: 6 }}>
+            {notice.description}
+          </div>
+          <div style={{ fontSize: 11, color: t.textFaint }}>
+            {notice.author} · {formatDateLabel(notice.date)} · {notice.category}
+          </div>
+        </div>
+        {!isRead && (
+          <button
+            onClick={() => onMarkRead(notice.id)}
+            style={{
+              flexShrink: 0, fontSize: 11, fontWeight: 600, padding: "5px 10px", borderRadius: 7,
+              border: `1px solid ${t.border}`, background: "transparent", color: t.textMuted, cursor: "pointer",
+            }}
+          >
+            Mark read
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function InstitutionNotices({ readNoticeIds, onMarkRead, t }) {
+  const sorted = [...NOTICES].sort((a, b) => new Date(b.date) - new Date(a.date));
+  return (
+    <div>
+      {sorted.map((n) => (
+        <NoticeCard key={n.id} notice={n} isRead={readNoticeIds.includes(n.id)} onMarkRead={onMarkRead} t={t} />
+      ))}
+    </div>
+  );
+}
+
+function ExamCard({ exam, t }) {
+  const subject = SUBJECTS[exam.subjectId];
+  return (
+    <div style={{ background: t.surface, border: `1px solid ${t.border}`, borderRadius: 12, padding: 16, marginBottom: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ width: 8, height: 8, borderRadius: "50%", background: subject.color }} />
+          <span style={{ fontSize: 14, fontWeight: 600 }}>{exam.title}</span>
+        </div>
+        {exam.status === "completed" ? (
+          <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, fontWeight: 700, color: "#34C77B" }}>
+            {exam.marks}/{exam.totalMarks}
+          </span>
+        ) : (
+          <span style={{ fontSize: 11, fontWeight: 600, color: t.textMuted }}>
+            in {daysUntil(exam.date)}d
+          </span>
+        )}
+      </div>
+      <div style={{ display: "flex", gap: 14, fontSize: 12, color: t.textMuted, marginBottom: 8, flexWrap: "wrap" }}>
+        <span style={{ display: "flex", alignItems: "center", gap: 4 }}><CalendarDays size={12} /> {formatDateLabel(exam.date)}</span>
+        <span style={{ display: "flex", alignItems: "center", gap: 4 }}><Clock size={12} /> {exam.time} · {exam.duration}</span>
+        <span style={{ display: "flex", alignItems: "center", gap: 4 }}><MapPin size={12} /> {exam.room}</span>
+      </div>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        {exam.syllabus.map((s) => (
+          <span
+            key={s}
+            style={{
+              fontSize: 10.5, padding: "3px 8px", borderRadius: 999,
+              background: t.surfaceRaised, border: `1px solid ${t.border}`, color: t.textMuted,
+            }}
+          >
+            {s}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function InstitutionExams({ t }) {
+  const upcoming = EXAM_SCHEDULE.filter((e) => e.status === "upcoming").sort((a, b) => new Date(a.date) - new Date(b.date));
+  const completed = EXAM_SCHEDULE.filter((e) => e.status === "completed").sort((a, b) => new Date(b.date) - new Date(a.date));
+  return (
+    <div>
+      <div style={{ fontSize: 12.5, fontWeight: 600, color: t.textMuted, marginBottom: 10, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+        Upcoming
+      </div>
+      {upcoming.length === 0 ? (
+        <EmptyState title="No upcoming exams" body="Nothing scheduled right now." t={t} />
+      ) : (
+        upcoming.map((e) => <ExamCard key={e.id} exam={e} t={t} />)
+      )}
+      {completed.length > 0 && (
+        <>
+          <div style={{ fontSize: 12.5, fontWeight: 600, color: t.textMuted, margin: "18px 0 10px", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+            Results
+          </div>
+          {completed.map((e) => <ExamCard key={e.id} exam={e} t={t} />)}
+        </>
+      )}
+    </div>
+  );
+}
+
+function EventCard({ event, t }) {
+  return (
+    <div style={{ background: t.surface, border: `1px solid ${t.border}`, borderRadius: 12, padding: 16, marginBottom: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+        <PartyPopper size={15} color={ACCENT} />
+        <span style={{ fontSize: 14, fontWeight: 600 }}>{event.title}</span>
+      </div>
+      <div style={{ fontSize: 12.5, color: t.textMuted, lineHeight: 1.5, marginBottom: 8 }}>{event.description}</div>
+      <div style={{ display: "flex", gap: 14, fontSize: 11.5, color: t.textFaint, flexWrap: "wrap" }}>
+        <span style={{ display: "flex", alignItems: "center", gap: 4 }}><CalendarDays size={12} /> {formatDateLabel(event.date)}</span>
+        <span style={{ display: "flex", alignItems: "center", gap: 4 }}><Clock size={12} /> {event.time}</span>
+        <span style={{ display: "flex", alignItems: "center", gap: 4 }}><MapPin size={12} /> {event.location}</span>
+        <span>by {event.organizer}</span>
+      </div>
+    </div>
+  );
+}
+
+function InstitutionEvents({ t }) {
+  const sorted = [...EVENTS].sort((a, b) => new Date(a.date) - new Date(b.date));
+  return (
+    <div>
+      {sorted.map((e) => <EventCard key={e.id} event={e} t={t} />)}
+    </div>
+  );
+}
+
+function MaterialRow({ material, t }) {
+  const subject = SUBJECTS[material.subjectId];
+  const Icon = MATERIAL_TYPE_ICON[material.type] || FileText;
+  return (
+    <div
+      style={{
+        display: "flex", alignItems: "center", gap: 12, padding: "11px 14px",
+        background: t.surface, border: `1px solid ${t.border}`, borderRadius: 10, marginBottom: 6,
+      }}
+    >
+      <span
+        style={{
+          width: 30, height: 30, borderRadius: 8, flexShrink: 0, background: `${subject.color}1A`,
+          display: "flex", alignItems: "center", justifyContent: "center",
+        }}
+      >
+        <Icon size={14} color={subject.color} />
+      </span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: t.text }}>{material.title}</div>
+        <div style={{ fontSize: 11, color: t.textFaint }}>
+          {subject.name} · {material.teacher} · {formatDateLabel(material.uploadDate)}
+        </div>
+      </div>
+      <span
+        style={{
+          fontSize: 10, fontWeight: 600, textTransform: "uppercase", color: t.textMuted,
+          border: `1px solid ${t.border}`, borderRadius: 6, padding: "3px 7px", flexShrink: 0,
+        }}
+      >
+        {material.type}
+      </span>
+    </div>
+  );
+}
+
+function InstitutionMaterials({ t }) {
+  const [subjectFilter, setSubjectFilter] = useState("all");
+  const filtered = subjectFilter === "all" ? MATERIALS : MATERIALS.filter((m) => m.subjectId === subjectFilter);
+  return (
+    <div>
+      <div style={{ marginBottom: 12 }}>
+        <select
+          value={subjectFilter}
+          onChange={(e) => setSubjectFilter(e.target.value)}
+          style={{
+            background: t.surface, border: `1px solid ${t.border}`, borderRadius: 9,
+            padding: "8px 10px", color: t.text, fontSize: 13, fontFamily: "inherit",
+          }}
+        >
+          {SUBJECT_FILTERS.map((s) => (
+            <option key={s.id} value={s.id}>{s.name}</option>
+          ))}
+        </select>
+      </div>
+      {filtered.map((m) => <MaterialRow key={m.id} material={m} t={t} />)}
+    </div>
+  );
+}
+
+const INSTITUTION_SECTIONS = [
+  { id: "overview", label: "Overview" },
+  { id: "timetable", label: "Timetable" },
+  { id: "attendance", label: "Attendance" },
+  { id: "notices", label: "Notices" },
+  { id: "exams", label: "Exams" },
+  { id: "events", label: "Events" },
+  { id: "materials", label: "Materials" },
+];
+
+function InstitutionView({ readNoticeIds, onMarkNoticeRead, t }) {
+  const [section, setSection] = useState("overview");
+  const unreadCount = NOTICES.filter((n) => !readNoticeIds.includes(n.id)).length;
+
+  return (
+    <div>
+      <div style={{ marginBottom: 4 }}>
+        <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 20, fontWeight: 700 }}>
+          {INSTITUTION.name}
+        </div>
+        <div style={{ fontSize: 12.5, color: t.textMuted, marginBottom: 16 }}>
+          {INSTITUTION.program} · Class {INSTITUTION.studentClass}-{INSTITUTION.section} · Roll {INSTITUTION.rollNumber}
+        </div>
+      </div>
+
+      <SegmentedTabs
+        options={INSTITUTION_SECTIONS.map((s) =>
+          s.id === "notices" && unreadCount > 0 ? { ...s, label: `${s.label} (${unreadCount})` } : s
+        )}
+        value={section}
+        onChange={setSection}
+        t={t}
+      />
+
+      {section === "overview" && <InstitutionOverview readNoticeIds={readNoticeIds} t={t} />}
+      {section === "timetable" && <InstitutionTimetable t={t} />}
+      {section === "attendance" && <InstitutionAttendance t={t} />}
+      {section === "notices" && <InstitutionNotices readNoticeIds={readNoticeIds} onMarkRead={onMarkNoticeRead} t={t} />}
+      {section === "exams" && <InstitutionExams t={t} />}
+      {section === "events" && <InstitutionEvents t={t} />}
+      {section === "materials" && <InstitutionMaterials t={t} />}
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------------------
+   LOGIN GATE (demo only)
+   Nothing here is real authentication: any email/password is accepted, no
+   credential is checked or stored, and "logged in" is just a boolean flag
+   in storage. A real version would call a backend auth endpoint (and would
+   never store a password client-side at all).
+   --------------------------------------------------------------------------- */
+
+function LoginView({ onLogin, t }) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [mode, setMode] = useState("login"); // "login" | "signup"
+
+  function handleSubmit(e) {
+    e.preventDefault();
+    // Demo only — no credential is actually verified.
+    onLogin(email || "student@example.com");
+  }
+
+  return (
+    <div
+      style={{
+        minHeight: 560, borderRadius: 16, background: t.bg, color: t.text,
+        fontFamily: "Inter, system-ui, -apple-system, sans-serif",
+        display: "flex", alignItems: "center", justifyContent: "center", padding: 24,
+      }}
+    >
+      <div style={{ width: "100%", maxWidth: 360 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, justifyContent: "center", marginBottom: 24 }}>
+          <div
+            style={{
+              width: 34, height: 34, borderRadius: 9,
+              background: `linear-gradient(135deg, ${SUBJECTS.physics.color}, ${SUBJECTS.mathematics.color})`,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 16, color: "#0F1419",
+            }}
+          >
+            S
+          </div>
+          <span style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 19 }}>
+            StudentOS
+          </span>
+        </div>
+
+        <div
+          style={{
+            background: t.surface, border: `1px solid ${t.border}`, borderRadius: 16,
+            padding: 26,
+          }}
+        >
+          <div style={{ display: "flex", gap: 4, marginBottom: 20, background: t.surfaceRaised, borderRadius: 9, padding: 3 }}>
+            {["login", "signup"].map((m) => (
+              <button
+                key={m}
+                onClick={() => setMode(m)}
+                style={{
+                  flex: 1, padding: "7px 0", borderRadius: 7, border: "none", cursor: "pointer",
+                  fontSize: 12.5, fontWeight: 600,
+                  background: mode === m ? t.surface : "transparent",
+                  color: mode === m ? t.text : t.textMuted,
+                }}
+              >
+                {m === "login" ? "Sign in" : "Create account"}
+              </button>
+            ))}
+          </div>
+
+          <form onSubmit={handleSubmit}>
+            <label style={{ display: "block", fontSize: 12, color: t.textMuted, marginBottom: 6 }}>Email</label>
+            <div
+              style={{
+                display: "flex", alignItems: "center", gap: 8, marginBottom: 14,
+                background: t.surfaceRaised, border: `1px solid ${t.border}`, borderRadius: 9, padding: "9px 12px",
+              }}
+            >
+              <Mail size={14} color={t.textFaint} />
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@example.com"
+                style={{ border: "none", outline: "none", background: "transparent", color: t.text, fontSize: 13.5, flex: 1, fontFamily: "inherit" }}
+              />
+            </div>
+
+            <label style={{ display: "block", fontSize: 12, color: t.textMuted, marginBottom: 6 }}>Password</label>
+            <div
+              style={{
+                display: "flex", alignItems: "center", gap: 8, marginBottom: 18,
+                background: t.surfaceRaised, border: `1px solid ${t.border}`, borderRadius: 9, padding: "9px 12px",
+              }}
+            >
+              <Lock size={14} color={t.textFaint} />
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                style={{ border: "none", outline: "none", background: "transparent", color: t.text, fontSize: 13.5, flex: 1, fontFamily: "inherit" }}
+              />
+            </div>
+
+            <button
+              type="submit"
+              style={{
+                width: "100%", padding: "11px 0", borderRadius: 9, border: "none",
+                background: ACCENT, color: "#0F1419", fontSize: 13.5, fontWeight: 700, cursor: "pointer",
+              }}
+            >
+              {mode === "login" ? "Sign in" : "Create account"}
+            </button>
+          </form>
+
+          <button
+            onClick={() => onLogin("guest@example.com")}
+            style={{
+              width: "100%", marginTop: 10, padding: "10px 0", borderRadius: 9,
+              border: `1px solid ${t.border}`, background: "transparent", color: t.textMuted,
+              fontSize: 13, cursor: "pointer",
+            }}
+          >
+            Continue as guest
+          </button>
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, marginTop: 16 }}>
+          <ShieldCheck size={12} color={t.textFaint} />
+          <span style={{ fontSize: 11, color: t.textFaint }}>
+            Demo mode — no real accounts, nothing you type here is checked or stored securely.
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------------------
+   SUBSCRIPTION / BILLING (demo only)
+   No payment processor is wired up. Selecting a plan just sets a label in
+   storage — nothing is charged, and there is no real billing relationship.
+   A real version needs a backend + a payment processor (e.g. Stripe); that
+   can never live in frontend code, since it involves real money.
+   --------------------------------------------------------------------------- */
+
+const PLANS = [
+  {
+    id: "free", name: "Free", monthly: 0, yearly: 0,
+    tagline: "Get started with the core loop.",
+    features: ["Full JEE syllabus tracker", "Focus timer with presets", "Today's Plan & streaks", "Institution dashboard (read-only)"],
+  },
+  {
+    id: "pro", name: "Pro", monthly: 299, yearly: 2499,
+    tagline: "For students serious about their prep.",
+    features: [
+      "Everything in Free", "Full Progress analytics & trends",
+      "Unlimited daily-plan tasks", "Priority-ranked study suggestions", "Custom timer presets",
+    ],
+    highlighted: true,
+  },
+  {
+    id: "institute", name: "Institute", monthly: 999, yearly: 8999,
+    tagline: "For coaching institutes managing many students.",
+    features: [
+      "Everything in Pro", "Institution-side notice & exam publishing",
+      "Batch-wide attendance & analytics", "Teacher accounts (coming soon)",
+    ],
+  },
+];
+
+function PlanCard({ plan, billing, isCurrent, onSelect, t }) {
+  const price = billing === "monthly" ? plan.monthly : plan.yearly;
+  const priceLabel = price === 0 ? "Free" : `₹${price.toLocaleString("en-IN")}`;
+  const period = price === 0 ? "" : billing === "monthly" ? "/month" : "/year";
+
+  return (
+    <div
+      style={{
+        flex: 1, minWidth: 220, background: t.surface, borderRadius: 16,
+        border: `1.5px solid ${plan.highlighted ? ACCENT : t.border}`,
+        padding: 22, display: "flex", flexDirection: "column", gap: 14, position: "relative",
+      }}
+    >
+      {plan.highlighted && (
+        <span
+          style={{
+            position: "absolute", top: -11, left: 20, background: ACCENT, color: "#0F1419",
+            fontSize: 10.5, fontWeight: 700, padding: "3px 10px", borderRadius: 999,
+            display: "flex", alignItems: "center", gap: 4,
+          }}
+        >
+          <Sparkles size={11} /> Most popular
+        </span>
+      )}
+      <div>
+        <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 17, fontWeight: 700 }}>{plan.name}</div>
+        <div style={{ fontSize: 12, color: t.textMuted, marginTop: 3 }}>{plan.tagline}</div>
+      </div>
+      <div>
+        <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 26, fontWeight: 700 }}>{priceLabel}</span>
+        <span style={{ fontSize: 12.5, color: t.textMuted }}>{period}</span>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8, flex: 1 }}>
+        {plan.features.map((f) => (
+          <div key={f} style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+            <Check size={13} color="#34C77B" style={{ marginTop: 2, flexShrink: 0 }} />
+            <span style={{ fontSize: 12.5, color: t.text, lineHeight: 1.4 }}>{f}</span>
+          </div>
+        ))}
+      </div>
+      <button
+        onClick={() => onSelect(plan.id)}
+        disabled={isCurrent}
+        style={{
+          padding: "10px 0", borderRadius: 9, border: isCurrent ? `1px solid ${t.border}` : "none",
+          background: isCurrent ? "transparent" : plan.highlighted ? ACCENT : t.surfaceRaised,
+          color: isCurrent ? t.textMuted : plan.highlighted ? "#0F1419" : t.text,
+          fontSize: 13, fontWeight: 700, cursor: isCurrent ? "default" : "pointer",
+        }}
+      >
+        {isCurrent ? "Current plan" : plan.id === "free" ? "Downgrade" : "Upgrade"}
+      </button>
+    </div>
+  );
+}
+
+function SubscriptionView({ currentPlan, onSelectPlan, t }) {
+  const [billing, setBilling] = useState("monthly");
+  const [justChanged, setJustChanged] = useState(null);
+
+  function handleSelect(planId) {
+    onSelectPlan(planId);
+    setJustChanged(planId);
+    setTimeout(() => setJustChanged(null), 3000);
+  }
+
+  return (
+    <div>
+      <div style={{ marginBottom: 6 }}>
+        <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 20, fontWeight: 700 }}>
+          Plans & Billing
+        </div>
+        <div style={{ fontSize: 12.5, color: t.textMuted, marginTop: 2 }}>
+          Demo only — no payment is processed and nothing is charged.
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 4, margin: "18px 0 20px", background: t.surface, border: `1px solid ${t.border}`, borderRadius: 9, padding: 3, width: "fit-content" }}>
+        {["monthly", "yearly"].map((b) => (
+          <button
+            key={b}
+            onClick={() => setBilling(b)}
+            style={{
+              padding: "7px 16px", borderRadius: 7, border: "none", cursor: "pointer",
+              fontSize: 12.5, fontWeight: 600,
+              background: billing === b ? t.surfaceRaised : "transparent",
+              color: billing === b ? t.text : t.textMuted,
+            }}
+          >
+            {b === "monthly" ? "Monthly" : "Yearly (save ~30%)"}
+          </button>
+        ))}
+      </div>
+
+      {justChanged && (
+        <div
+          style={{
+            background: `${"#34C77B"}1A`, border: "1px solid #34C77B", color: "#34C77B",
+            borderRadius: 9, padding: "9px 14px", fontSize: 12.5, fontWeight: 600, marginBottom: 16,
+          }}
+        >
+          You're now on {PLANS.find((p) => p.id === justChanged).name} (demo only — nothing was charged).
+        </div>
+      )}
+
+      <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
+        {PLANS.map((plan) => (
+          <PlanCard
+            key={plan.id}
+            plan={plan}
+            billing={billing}
+            isCurrent={currentPlan === plan.id}
+            onSelect={handleSelect}
+            t={t}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================================
+   APP
+   ============================================================================ */
+
+export default function StudentOS() {
+  const [loading, setLoading] = useState(true);
+  const [profile, setProfile] = useState(DEFAULT_PROFILE);
+  const [topicStatus, setTopicStatus] = useState({});
+  const [sessions, setSessions] = useState([]);
+  const [tasks, setTasks] = useState([]);
+  const [readNoticeIds, setReadNoticeIds] = useState([]);
+  const [auth, setAuth] = useState(DEFAULT_AUTH);
+  const [activeTab, setActiveTab] = useState("dashboard");
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      const [p, ts, s, tk, rn, a] = await Promise.all([
+        db.getProfile(), db.getTopicStatus(), db.getSessions(), db.getTasks(), db.getReadNotices(), db.getAuth(),
+      ]);
+      if (!mounted) return;
+      setProfile(p);
+      setTopicStatus(ts);
+      setSessions(s);
+      setTasks(tk);
+      setReadNoticeIds(rn);
+      setAuth(a);
+      setLoading(false);
+    })();
+    return () => { mounted = false; };
+  }, []);
+
+  const toggleTheme = useCallback(() => {
+    setProfile((prev) => {
+      const next = { ...prev, theme: prev.theme === "dark" ? "light" : "dark" };
+      db.saveProfile(next);
+      return next;
+    });
+  }, []);
+
+  const awardXp = useCallback((amount) => {
+    setProfile((prev) => {
+      const next = { ...prev, xp: prev.xp + amount };
+      db.saveProfile(next);
+      return next;
+    });
+  }, []);
+
+  // Phase 2: cycle a topic's status and persist it. Completing a topic
+  // (transitioning INTO "completed") awards a one-time XP bonus.
+  const handleCycleTopic = useCallback((topicId) => {
+    setTopicStatus((prev) => {
+      const prevStatus = prev[topicId] || "not_started";
+      const newStatus = nextStatus(prevStatus);
+      const next = { ...prev, [topicId]: newStatus };
+      db.saveTopicStatus(next);
+      if (newStatus === "completed" && prevStatus !== "completed") {
+        awardXp(XP_RULES.topicCompletedBonus);
+      }
+      return next;
+    });
+  }, [awardXp]);
+
+  // Phase 3: a finished timer session is appended, persisted, and its
+  // XP (computed by the timer via computeSessionXp) is credited.
+  const handleCompleteSession = useCallback((session) => {
+    setSessions((prev) => {
+      const next = [...prev, session];
+      db.saveSessions(next);
+      return next;
+    });
+    awardXp(session.xpEarned);
+  }, [awardXp]);
+
+  // Phase: Institution — mark a notice read and persist it. Everything else
+  // in the institution dashboard is institution-authored seed data, so it
+  // has no student-side mutation.
+  const handleMarkNoticeRead = useCallback((noticeId) => {
+    setReadNoticeIds((prev) => {
+      if (prev.includes(noticeId)) return prev;
+      const next = [...prev, noticeId];
+      db.saveReadNotices(next);
+      return next;
+    });
+  }, []);
+
+  // DEMO ONLY — sets a "logged in" flag and the typed email, nothing else.
+  // No credential is verified. See db.getAuth/saveAuth above for the caveat.
+  const handleLogin = useCallback((email) => {
+    const next = { loggedIn: true, email };
+    setAuth(next);
+    db.saveAuth(next);
+  }, []);
+
+  const handleLogout = useCallback(() => {
+    const next = { loggedIn: false, email: null };
+    setAuth(next);
+    db.saveAuth(next);
+  }, []);
+
+  // DEMO ONLY — no payment is processed. This just labels the profile.
+  const handleSelectPlan = useCallback((planId) => {
+    setProfile((prev) => {
+      const next = { ...prev, plan: planId };
+      db.saveProfile(next);
+      return next;
+    });
+  }, []);
+
+  // Phase 4: Today's Plan — tasks are dated with a local YYYY-MM-DD key so
+  // "today" always matches the student's own clock, not UTC.
+  const handleAddTask = useCallback(({ subjectId, topicId, estMinutes, priority }) => {
+    setTasks((prev) => {
+      const next = [
+        ...prev,
+        {
+          id: `task-${Date.now()}`,
+          date: localDateKey(),
+          subjectId, topicId, estMinutes, priority,
+          status: "pending",
+        },
+      ];
+      db.saveTasks(next);
+      return next;
+    });
+  }, []);
+
+  const handleToggleTask = useCallback((taskId) => {
+    setTasks((prev) => {
+      const next = prev.map((tk) =>
+        tk.id === taskId ? { ...tk, status: tk.status === "done" ? "pending" : "done" } : tk
+      );
+      db.saveTasks(next);
+      return next;
+    });
+  }, []);
+
+  const handleDeleteTask = useCallback((taskId) => {
+    setTasks((prev) => {
+      const next = prev.filter((tk) => tk.id !== taskId);
+      db.saveTasks(next);
+      return next;
+    });
+  }, []);
+
+  const handleUpdateDailyGoal = useCallback((minutes) => {
+    setProfile((prev) => {
+      const next = { ...prev, dailyGoalMinutes: minutes };
+      db.saveProfile(next);
+      return next;
+    });
+  }, []);
+
+  const t = THEMES[profile.theme] || THEMES.dark;
+
+  const subjectProgress = useMemo(() => {
+    const out = {};
+    Object.keys(SUBJECTS).forEach((id) => { out[id] = computeSubjectProgress(id, topicStatus); });
+    return out;
+  }, [topicStatus]);
+
+  const overallProgress = useMemo(() => computeOverallProgress(topicStatus), [topicStatus]);
+
+  const todayMinutes = useMemo(() => minutesFromSessions(sessions, startOfTodayMs()), [sessions]);
+  const weekMinutes = useMemo(() => minutesFromSessions(sessions, startOfWeekMs()), [sessions]);
+
+  const streak = useMemo(
+    () => computeStreak(sessions, profile.dailyGoalMinutes),
+    [sessions, profile.dailyGoalMinutes]
+  );
+
+  // Phase 4: award the daily-goal XP bonus once per calendar day, the first
+  // time today's total study minutes crosses the goal.
+  useEffect(() => {
+    if (loading) return;
+    const todayKey = localDateKey();
+    if (todayMinutes >= profile.dailyGoalMinutes && profile.lastGoalBonusDate !== todayKey) {
+      setProfile((prev) => {
+        if (prev.lastGoalBonusDate === todayKey) return prev;
+        const next = { ...prev, xp: prev.xp + XP_RULES.dailyGoalBonus, lastGoalBonusDate: todayKey };
+        db.saveProfile(next);
+        return next;
+      });
+    }
+  }, [todayMinutes, profile.dailyGoalMinutes, profile.lastGoalBonusDate, loading]);
+
+  const todayTasks = useMemo(() => {
+    const todayKey = localDateKey();
+    return tasks.filter((tk) => tk.date === todayKey);
+  }, [tasks]);
+
+  const recentSessions = useMemo(
+    () => [...sessions].sort((a, b) => new Date(b.startedAt) - new Date(a.startedAt)).slice(0, 5),
+    [sessions]
+  );
+
+  if (loading) {
+    return (
+      <div style={{
+        background: THEMES.dark.bg, color: THEMES.dark.textMuted, minHeight: 420,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        fontFamily: "Inter, system-ui, sans-serif", fontSize: 13.5,
+      }}>
+        Loading StudentOS…
+      </div>
+    );
+  }
+
+  if (!auth.loggedIn) {
+    return <LoginView onLogin={handleLogin} t={t} />;
+  }
+
+  return (
+    <div
+      style={{
+        background: t.bg,
+        color: t.text,
+        fontFamily: "Inter, system-ui, -apple-system, sans-serif",
+        minHeight: 560,
+        borderRadius: 16,
+        overflow: "hidden",
+        display: "flex",
+        flexDirection: "column",
+      }}
+    >
+      {/* Top bar */}
+      <div
+        style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          padding: "16px 22px", borderBottom: `1px solid ${t.border}`,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div
+            style={{
+              width: 30, height: 30, borderRadius: 8,
+              background: `linear-gradient(135deg, ${SUBJECTS.physics.color}, ${SUBJECTS.mathematics.color})`,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 14, color: "#0F1419",
+            }}
+          >
+            S
+          </div>
+          <span style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 16 }}>
+            StudentOS
+          </span>
+          <span
+            style={{
+              fontSize: 11, fontWeight: 600, letterSpacing: "0.04em",
+              padding: "3px 8px", borderRadius: 999,
+              background: t.surfaceRaised, border: `1px solid ${t.border}`, color: t.textMuted,
+            }}
+          >
+            {EXAMS[profile.examId].name.toUpperCase()}
+          </span>
+          <button
+            onClick={() => setActiveTab("subscription")}
+            style={{
+              fontSize: 11, fontWeight: 700, letterSpacing: "0.02em",
+              padding: "3px 9px", borderRadius: 999, border: "none", cursor: "pointer",
+              background: profile.plan === "free" ? t.surfaceRaised : `${ACCENT}1A`,
+              color: profile.plan === "free" ? t.textMuted : ACCENT,
+            }}
+          >
+            {PLANS.find((p) => p.id === profile.plan)?.name || "Free"} plan
+          </button>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <button
+            onClick={toggleTheme}
+            aria-label="Toggle theme"
+            style={{
+              width: 32, height: 32, borderRadius: 8, border: `1px solid ${t.border}`,
+              background: t.surface, color: t.textMuted, display: "flex",
+              alignItems: "center", justifyContent: "center", cursor: "pointer",
+            }}
+          >
+            {profile.theme === "dark" ? <Sun size={15} /> : <Moon size={15} />}
+          </button>
+          <button
+            onClick={handleLogout}
+            aria-label="Log out"
+            title="Log out (demo)"
+            style={{
+              width: 32, height: 32, borderRadius: 8, border: `1px solid ${t.border}`,
+              background: t.surface, color: t.textMuted, display: "flex",
+              alignItems: "center", justifyContent: "center", cursor: "pointer",
+            }}
+          >
+            <LogOut size={15} />
+          </button>
+        </div>
+      </div>
+
+      <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
+        {/* Side nav */}
+        <div
+          style={{
+            width: 176, borderRight: `1px solid ${t.border}`, padding: "16px 10px",
+            display: "flex", flexDirection: "column", gap: 2, flexShrink: 0,
+          }}
+        >
+          {NAV_ITEMS.map((item) => {
+            const active = activeTab === item.id;
+            const locked = false;
+            return (
+              <button
+                key={item.id}
+                onClick={() => setActiveTab(item.id)}
+                style={{
+                  display: "flex", alignItems: "center", gap: 10,
+                  padding: "9px 10px", borderRadius: 8, border: "none",
+                  background: active ? t.surfaceRaised : "transparent",
+                  color: active ? t.text : t.textMuted,
+                  fontSize: 13, fontWeight: active ? 600 : 500,
+                  cursor: "pointer", textAlign: "left", width: "100%",
+                }}
+              >
+                <item.icon size={15} strokeWidth={2.1} />
+                <span style={{ flex: 1 }}>{item.label}</span>
+                {locked && (
+                  <span style={{ fontSize: 9.5, color: t.textFaint, fontWeight: 600 }}>
+                    P{item.phase}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Main content */}
+        <div style={{ flex: 1, padding: "22px 24px", overflowY: "auto" }}>
+          {activeTab === "institution" ? (
+            <InstitutionView
+              readNoticeIds={readNoticeIds}
+              onMarkNoticeRead={handleMarkNoticeRead}
+              t={t}
+            />
+          ) : activeTab === "syllabus" ? (
+            <SyllabusView
+              topicStatus={topicStatus}
+              onCycleTopic={handleCycleTopic}
+              subjectProgress={subjectProgress}
+              overallProgress={overallProgress}
+              t={t}
+            />
+          ) : activeTab === "timer" ? (
+            <TimerView onCompleteSession={handleCompleteSession} t={t} />
+          ) : activeTab === "plan" ? (
+            <PlanView
+              tasks={todayTasks}
+              onAddTask={handleAddTask}
+              onToggleTask={handleToggleTask}
+              onDeleteTask={handleDeleteTask}
+              dailyGoalMinutes={profile.dailyGoalMinutes}
+              onUpdateGoal={handleUpdateDailyGoal}
+              todayMinutes={todayMinutes}
+              t={t}
+            />
+          ) : activeTab === "progress" ? (
+            <ProgressView
+              subjectProgress={subjectProgress}
+              overallProgress={overallProgress}
+              topicStatus={topicStatus}
+              sessions={sessions}
+              xp={profile.xp}
+              streak={streak}
+              t={t}
+            />
+          ) : activeTab === "subscription" ? (
+            <SubscriptionView currentPlan={profile.plan} onSelectPlan={handleSelectPlan} t={t} />
+          ) : activeTab !== "dashboard" ? (
+            <PhasePlaceholder tab={activeTab} t={t} />
+          ) : (
+            <>
+              <div style={{ marginBottom: 20 }}>
+                <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 20, fontWeight: 700 }}>
+                  {greeting()}, {profile.name}.
+                </div>
+                <div style={{ fontSize: 13, color: t.textMuted, marginTop: 2 }}>
+                  {overallProgress > 0
+                    ? `${overallProgress}% of the JEE syllabus covered so far.`
+                    : "Head to Syllabus to start marking topics, or Timer to log your first session."}
+                </div>
+              </div>
+
+              {/* Stat row */}
+              <div
+                style={{
+                  display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+                  gap: 12, marginBottom: 20,
+                }}
+              >
+                <StatCard icon={Clock} label="Today" value={formatMinutes(todayMinutes)} sub="study time" accent={ACCENT} t={t} />
+                <StatCard icon={CalendarDays} label="This week" value={formatMinutes(weekMinutes)} sub="study time" accent={ACCENT} t={t} />
+                <StatCard icon={Flame} label="Streak" value={streak.current} sub={`best: ${streak.longest}`} accent={STREAK_ACCENT} t={t} />
+                <StatCard icon={Zap} label="XP" value={profile.xp} sub="total earned" accent={ACCENT} t={t} />
+              </div>
+
+              {/* Rings + panels */}
+              <div style={{ display: "grid", gridTemplateColumns: "minmax(280px, 1fr) minmax(240px, 1fr)", gap: 14 }}>
+                <div style={{ background: t.surface, border: `1px solid ${t.border}`, borderRadius: 14, padding: 20 }}>
+                  <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 16 }}>
+                    <span style={{ fontSize: 13.5, fontWeight: 600 }}>Syllabus coverage</span>
+                    <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 12.5, color: t.textMuted }}>
+                      {ALL_TOPICS.length} topics
+                    </span>
+                  </div>
+                  <SubjectRings progress={subjectProgress} t={t} />
+                </div>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                  <div style={{ background: t.surface, border: `1px solid ${t.border}`, borderRadius: 14, padding: 18 }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                      <span style={{ fontSize: 13.5, fontWeight: 600 }}>Today's plan</span>
+                      <button
+                        onClick={() => setActiveTab("plan")}
+                        style={{ border: "none", background: "transparent", cursor: "pointer", display: "flex", padding: 0 }}
+                        aria-label="Open Today's Plan"
+                      >
+                        <ChevronRight size={14} color={t.textFaint} />
+                      </button>
+                    </div>
+                    {todayTasks.length === 0 ? (
+                      <EmptyState
+                        title="Nothing planned yet"
+                        body="Add a subject and topic from Today's Plan to line up your study session."
+                        t={t}
+                      />
+                    ) : (
+                      todayTasks
+                        .slice(0, 4)
+                        .map((tk) => (
+                          <TaskRow key={tk.id} task={tk} onToggle={handleToggleTask} onDelete={handleDeleteTask} t={t} />
+                        ))
+                    )}
+                  </div>
+
+                  <div style={{ background: t.surface, border: `1px solid ${t.border}`, borderRadius: 14, padding: 18 }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                      <span style={{ fontSize: 13.5, fontWeight: 600 }}>Recent sessions</span>
+                      <button
+                        onClick={() => setActiveTab("timer")}
+                        style={{ border: "none", background: "transparent", cursor: "pointer", display: "flex", padding: 0 }}
+                        aria-label="Open Timer"
+                      >
+                        <ChevronRight size={14} color={t.textFaint} />
+                      </button>
+                    </div>
+                    {recentSessions.length === 0 ? (
+                      <EmptyState
+                        title="No sessions logged"
+                        body="Run a focus session from the Timer tab — it'll show up here with subject, duration and XP."
+                        t={t}
+                      />
+                    ) : (
+                      recentSessions.map((s) => {
+                        const subject = SUBJECTS[s.subjectId];
+                        const topic = ALL_TOPICS.find((tp) => tp.id === s.topicId);
+                        return (
+                          <div
+                            key={s.id}
+                            style={{
+                              display: "flex", alignItems: "center", gap: 10, padding: "8px 0",
+                              borderBottom: `1px solid ${t.border}`,
+                            }}
+                          >
+                            <span style={{ width: 8, height: 8, borderRadius: "50%", background: subject.color, flexShrink: 0 }} />
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontSize: 12.5, color: t.text, fontWeight: 500 }}>
+                                {topic ? topic.name : subject.name}
+                              </div>
+                              <div style={{ fontSize: 11, color: t.textFaint }}>
+                                {new Date(s.startedAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                              </div>
+                            </div>
+                            <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, color: t.textMuted }}>
+                              {formatMinutes(s.durationSec / 60)}
+                            </span>
+                            <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11.5, color: ACCENT }}>
+                              +{s.xpEarned}
+                            </span>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function greeting() {
+  const h = new Date().getHours();
+  if (h < 5) return "Still up";
+  if (h < 12) return "Good morning";
+  if (h < 17) return "Good afternoon";
+  if (h < 21) return "Good evening";
+  return "Good night";
+}
+
+function PhasePlaceholder({ tab, t }) {
+  const item = NAV_ITEMS.find((i) => i.id === tab);
+  return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", minHeight: 340 }}>
+      <div style={{ textAlign: "center", maxWidth: 320 }}>
+        <div
+          style={{
+            width: 44, height: 44, borderRadius: 12, background: t.surface, border: `1px solid ${t.border}`,
+            display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 14px",
+          }}
+        >
+          <item.icon size={19} color={t.textMuted} strokeWidth={1.8} />
+        </div>
+        <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 15, fontWeight: 700, marginBottom: 6 }}>
+          {item.label} — coming in Phase {item.phase}
+        </div>
+        <div style={{ fontSize: 12.5, color: t.textMuted, lineHeight: 1.5 }}>
+          This part of the build isn't scoped for Phase 1. The dashboard, JEE syllabus data,
+          and app shell are live now — this section unlocks as we work through the phased plan.
+        </div>
+      </div>
+    </div>
+  );
+}
