@@ -1,18 +1,22 @@
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { AnimatedGroup } from "./components/core/animated-group";
+import { SlidingNumber } from "./components/core/sliding-number";
+import { ProfileIdentity, TitlesView } from "./components/TitlesView";
+import InstitutePortal from "./components/InstitutePortal";
+import { DEFAULT_TITLES, isTitleUnlocked, normalizeRarity, ROLE_IDS } from "./title-catalog";
+import { isSupabaseConfigured, supabase } from "./supabase";
 import {
   Flame, Zap, Clock, CalendarDays, Sun, Moon, LayoutDashboard,
   BookOpen, Timer as TimerIcon, ListChecks, LineChart, ChevronRight,
   Search, X, Check, Building2, Bell, MapPin, FileText, Video, Link2,
   AlertCircle, Users, GraduationCap, PartyPopper, CreditCard, LogOut,
-  Mail, Lock, Sparkles, ShieldCheck,
+  Mail, Lock, Sparkles, ShieldCheck, Award, Play, Pause, RotateCcw,
 } from "lucide-react";
 
 /* ============================================================================
    DATA LAYER (db.js equivalent)
-   Every function here is written the way a real API call would be shaped
-   (async, keyed by userId, returns/accepts plain objects) so that swapping
-   window.storage for a real backend later is a drop-in change — no caller
-   in this file should ever need to change.
+  Authenticated users use Supabase when configured; guest/demo data uses
+  the host storage adapter or browser localStorage.
    ============================================================================ */
 
 const STORAGE_KEYS = {
@@ -22,6 +26,7 @@ const STORAGE_KEYS = {
   tasks: "studentos:tasks",
   readNotices: "studentos:read-notices",
   auth: "studentos:auth",
+  titleSystem: "studentos:title-system",
 };
 
 const DEFAULT_PROFILE = {
@@ -30,115 +35,169 @@ const DEFAULT_PROFILE = {
   dailyGoalMinutes: 120,
   theme: "dark",
   xp: 0,
+  activeTitleId: null,
   streak: { current: 0, longest: 0, lastActiveDate: null },
   lastGoalBonusDate: null,
   plan: "free",
+  planDuration: "month",
 };
 
 const DEFAULT_AUTH = { loggedIn: false, email: null };
+const DEFAULT_TITLE_SYSTEM = { members: {}, customTitles: [], overrides: {} };
+const EMPTY_MEMBER = { grantedTitleIds: [] };
+const OWNER_EMAIL = (import.meta.env.VITE_STUDENTOS_OWNER_EMAIL || "").trim().toLowerCase();
+
+async function readStoredValue(key) {
+  if (typeof window === "undefined") return null;
+  if (isSupabaseConfigured) {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.user) {
+      const { data, error } = await supabase
+        .from("studentos_user_data")
+        .select("value")
+        .eq("user_id", session.user.id)
+        .eq("data_key", key)
+        .maybeSingle();
+      if (error) {
+        console.error("Could not load StudentOS data from Supabase", error);
+        return null;
+      }
+      return data ? JSON.stringify(data.value) : null;
+    }
+  }
+  try {
+    if (window.storage?.get) {
+      const result = await window.storage.get(key, false);
+      if (result?.value != null) return result.value;
+    }
+  } catch {
+    // Fall through to browser storage when the host adapter is unavailable.
+  }
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+async function writeStoredValue(key, value) {
+  if (typeof window === "undefined") return;
+  if (isSupabaseConfigured) {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.user) {
+      let parsedValue;
+      try {
+        parsedValue = JSON.parse(value);
+      } catch {
+        parsedValue = value;
+      }
+      const { error } = await supabase.from("studentos_user_data").upsert(
+        { user_id: session.user.id, data_key: key, value: parsedValue },
+        { onConflict: "user_id,data_key" }
+      );
+      if (error) console.error("Could not save StudentOS data to Supabase", error);
+      return;
+    }
+  }
+  try {
+    if (window.storage?.set) {
+      await window.storage.set(key, value, false);
+      return;
+    }
+  } catch {
+    // Fall through to browser storage when the host adapter is unavailable.
+  }
+  try {
+    window.localStorage.setItem(key, value);
+  } catch (error) {
+    console.error(`Could not persist ${key}`, error);
+  }
+}
+
+async function readStoredJson(key, fallback) {
+  const value = await readStoredValue(key);
+  if (!value) return fallback;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return fallback;
+  }
+}
+
+async function writeStoredJson(key, value) {
+  await writeStoredValue(key, JSON.stringify(value));
+  return value;
+}
 
 const db = {
   async getProfile() {
-    try {
-      const res = await window.storage.get(STORAGE_KEYS.profile, false);
-      return res ? JSON.parse(res.value) : DEFAULT_PROFILE;
-    } catch {
-      return DEFAULT_PROFILE;
-    }
+    const profile = await readStoredJson(STORAGE_KEYS.profile, null);
+    return profile ? { ...DEFAULT_PROFILE, ...profile } : { ...DEFAULT_PROFILE };
   },
   async saveProfile(profile) {
-    try {
-      await window.storage.set(STORAGE_KEYS.profile, JSON.stringify(profile), false);
-    } catch (e) {
-      console.error("saveProfile failed", e);
-    }
-    return profile;
+    return writeStoredJson(STORAGE_KEYS.profile, profile);
   },
   async getTopicStatus() {
-    try {
-      const res = await window.storage.get(STORAGE_KEYS.topicStatus, false);
-      return res ? JSON.parse(res.value) : {};
-    } catch {
-      return {};
-    }
+    return readStoredJson(STORAGE_KEYS.topicStatus, {});
   },
   async saveTopicStatus(map) {
-    try {
-      await window.storage.set(STORAGE_KEYS.topicStatus, JSON.stringify(map), false);
-    } catch (e) {
-      console.error("saveTopicStatus failed", e);
-    }
-    return map;
+    return writeStoredJson(STORAGE_KEYS.topicStatus, map);
   },
   async getSessions() {
-    try {
-      const res = await window.storage.get(STORAGE_KEYS.sessions, false);
-      return res ? JSON.parse(res.value) : [];
-    } catch {
-      return [];
-    }
+    return readStoredJson(STORAGE_KEYS.sessions, []);
   },
   async saveSessions(sessions) {
-    try {
-      await window.storage.set(STORAGE_KEYS.sessions, JSON.stringify(sessions), false);
-    } catch (e) {
-      console.error("saveSessions failed", e);
-    }
-    return sessions;
+    return writeStoredJson(STORAGE_KEYS.sessions, sessions);
   },
   async getTasks() {
-    try {
-      const res = await window.storage.get(STORAGE_KEYS.tasks, false);
-      return res ? JSON.parse(res.value) : [];
-    } catch {
-      return [];
-    }
+    return readStoredJson(STORAGE_KEYS.tasks, []);
   },
   async saveTasks(tasks) {
-    try {
-      await window.storage.set(STORAGE_KEYS.tasks, JSON.stringify(tasks), false);
-    } catch (e) {
-      console.error("saveTasks failed", e);
-    }
-    return tasks;
+    return writeStoredJson(STORAGE_KEYS.tasks, tasks);
   },
   async getReadNotices() {
-    try {
-      const res = await window.storage.get(STORAGE_KEYS.readNotices, false);
-      return res ? JSON.parse(res.value) : [];
-    } catch {
-      return [];
-    }
+    return readStoredJson(STORAGE_KEYS.readNotices, []);
   },
   async saveReadNotices(ids) {
-    try {
-      await window.storage.set(STORAGE_KEYS.readNotices, JSON.stringify(ids), false);
-    } catch (e) {
-      console.error("saveReadNotices failed", e);
-    }
-    return ids;
+    return writeStoredJson(STORAGE_KEYS.readNotices, ids);
   },
-  // DEMO ONLY: this stores a boolean "logged in" flag and the email the
-  // person typed, nothing else. No password is ever stored, hashed, or
-  // checked — there is no real authentication here. A real version of this
-  // would call a backend auth endpoint instead of window.storage.
+  async getTitleSystem() {
+    const saved = await readStoredJson(STORAGE_KEYS.titleSystem, DEFAULT_TITLE_SYSTEM);
+    return {
+      ...DEFAULT_TITLE_SYSTEM,
+      ...saved,
+      members: saved?.members || {},
+      customTitles: Array.isArray(saved?.customTitles) ? saved.customTitles : [],
+      overrides: saved?.overrides || {},
+    };
+  },
+  async saveTitleSystem(titleSystem) {
+    return writeStoredJson(STORAGE_KEYS.titleSystem, titleSystem);
+  },
+  // Local demo fallback only. Configured Supabase auth uses its own session
+  // storage and never persists a password in this app.
   async getAuth() {
-    try {
-      const res = await window.storage.get(STORAGE_KEYS.auth, false);
-      return res ? JSON.parse(res.value) : DEFAULT_AUTH;
-    } catch {
-      return DEFAULT_AUTH;
+    if (isSupabaseConfigured) {
+      const { data, error } = await supabase.auth.getSession();
+      if (error) console.error("Could not restore Supabase session", error);
+      return {
+        loggedIn: Boolean(data.session),
+        email: data.session?.user?.email || null,
+      };
     }
+    return readStoredJson(STORAGE_KEYS.auth, DEFAULT_AUTH);
   },
   async saveAuth(auth) {
-    try {
-      await window.storage.set(STORAGE_KEYS.auth, JSON.stringify(auth), false);
-    } catch (e) {
-      console.error("saveAuth failed", e);
-    }
-    return auth;
+    return writeStoredJson(STORAGE_KEYS.auth, auth);
   },
 };
+
+function loadAppData() {
+  return Promise.all([
+    db.getProfile(), db.getTopicStatus(), db.getSessions(), db.getTasks(),
+    db.getReadNotices(), db.getAuth(), db.getTitleSystem(),
+  ]);
+}
 
 /* ============================================================================
    JEE SYLLABUS DATA
@@ -156,7 +215,7 @@ const EXAMS = {
 
 const SUBJECTS = {
   physics: { id: "physics", examId: "jee", name: "Physics", color: "#5B8DEF" },
-  chemistry: { id: "chemistry", examId: "jee", name: "Chemistry", color: "#34C77B" },
+  chemistry: { id: "chemistry", examId: "jee", name: "Chemistry", color: "#00E699" },
   mathematics: { id: "mathematics", examId: "jee", name: "Mathematics", color: "#F2A93B" },
 };
 
@@ -395,7 +454,7 @@ const STATUS_COLOR = {
   not_started: "#5B6472",
   learning: "#5B8DEF",
   practicing: "#F2A93B",
-  completed: "#34C77B",
+  completed: "#00E699",
 };
 
 function nextStatus(current) {
@@ -555,6 +614,7 @@ function computeSessionXp(durationSeconds) {
 const TIMER_PRESETS = [
   { id: "25-5", label: "25 / 5", focusMin: 25, breakMin: 5 },
   { id: "50-10", label: "50 / 10", focusMin: 50, breakMin: 10 },
+  { id: "90-15", label: "90 / 15", focusMin: 90, breakMin: 15 },
   { id: "custom", label: "Custom", focusMin: null, breakMin: null },
 ];
 
@@ -575,27 +635,27 @@ function formatClock(totalSeconds) {
 
 const THEMES = {
   dark: {
-    bg: "#0F1419",
-    surface: "#171D26",
-    surfaceRaised: "#1E2530",
-    border: "#2A3341",
-    text: "#EDF0F4",
-    textMuted: "#8B95A5",
-    textFaint: "#5B6472",
+    bg: "#0D0B14",
+    surface: "#13121F",
+    surfaceRaised: "#191827",
+    border: "#302B3C",
+    text: "#F7F5FC",
+    textMuted: "#9B98AA",
+    textFaint: "#787386",
   },
   light: {
-    bg: "#F5F6F8",
+    bg: "#F5F7FA",
     surface: "#FFFFFF",
-    surfaceRaised: "#FFFFFF",
-    border: "#E2E5EA",
-    text: "#181C22",
-    textMuted: "#5B6472",
-    textFaint: "#8B95A5",
+    surfaceRaised: "#F1F5F9",
+    border: "#D9E1EC",
+    text: "#111827",
+    textMuted: "#4E5D73",
+    textFaint: "#7C8BA3",
   },
 };
 
-const ACCENT = "#F2A93B"; // XP / streak accent (warm — late-night lamp)
-const STREAK_ACCENT = "#F2635C";
+const ACCENT = "#FF5E3A";
+const STREAK_ACCENT = "#FF5D73";
 
 /* ============================================================================
    UI PRIMITIVES
@@ -717,6 +777,7 @@ const NAV_ITEMS = [
   { id: "timer", label: "Timer", icon: TimerIcon, phase: 3 },
   { id: "plan", label: "Today's Plan", icon: ListChecks, phase: 4 },
   { id: "progress", label: "Progress", icon: LineChart, phase: 5 },
+  { id: "titles", label: "Titles", icon: Award, phase: 6 },
   { id: "subscription", label: "Plans & Billing", icon: CreditCard, phase: 0 },
 ];
 
@@ -743,31 +804,125 @@ function ProgressBar({ pct, color, t, height = 6 }) {
   );
 }
 
+function DashboardSyllabusCard({ topicStatus, onCycleTopic, subjectProgress, overallProgress, t }) {
+  const [expandedSubject, setExpandedSubject] = useState(null);
+
+  return (
+    <section className="dashboard-syllabus-card" style={{ background: t.surface, border: `1px solid ${t.border}`, borderRadius: 14, padding: 20 }}>
+      <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 12 }}>
+        <div style={{ fontSize: 13.5, fontWeight: 600 }}>Syllabus</div>
+        <div style={{ textAlign: "right" }}>
+          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 21, fontWeight: 700, lineHeight: 1.1 }}>
+            {overallProgress}%
+          </div>
+          <div style={{ marginTop: 3, fontSize: 10.5, color: t.textMuted }}>overall completion</div>
+        </div>
+      </div>
+      <div style={{ marginTop: 12, marginBottom: 8 }}>
+        <ProgressBar pct={overallProgress} color={ACCENT} t={t} height={5} />
+      </div>
+
+      <div>
+        {Object.values(SUBJECTS).map((subject) => {
+          const topics = ALL_TOPICS.filter((topic) => topic.subjectId === subject.id);
+          const isExpanded = expandedSubject === subject.id;
+
+          return (
+            <div
+              key={subject.id}
+              className="dashboard-syllabus__subject"
+              style={{ "--subject-color": subject.color, borderBottom: `1px solid ${t.border}` }}
+            >
+              <button
+                type="button"
+                className="dashboard-syllabus__subject-button"
+                onClick={() => setExpandedSubject(isExpanded ? null : subject.id)}
+                aria-expanded={isExpanded}
+                style={{ color: t.text }}
+              >
+                <span className="dashboard-syllabus__subject-dot" />
+                <span style={{ flex: 1, textAlign: "left" }}>{subject.name}</span>
+                <span style={{ color: t.textMuted }}>{subjectProgress[subject.id]}%</span>
+                <ChevronRight
+                  className={`dashboard-syllabus__chevron${isExpanded ? " is-expanded" : ""}`}
+                  size={15}
+                  color={t.textFaint}
+                />
+              </button>
+
+              {isExpanded && (
+                <ul className="dashboard-syllabus__topics">
+                  {topics.map((topic) => {
+                    const status = topicStatus[topic.id] || "not_started";
+                    const meta = STATUS[status];
+
+                    return (
+                      <li key={topic.id}>
+                        <button
+                          type="button"
+                          className="dashboard-syllabus__topic"
+                          onClick={() => onCycleTopic(topic.id)}
+                          title={`${meta.label} - click to update`}
+                          aria-label={`${topic.name}: ${meta.label}. Click to update status.`}
+                        >
+                          <span className="dashboard-syllabus__topic-dot" style={{ background: STATUS_COLOR[status] }} />
+                          <span
+                            className="dashboard-syllabus__topic-name"
+                            style={{ color: status === "completed" ? t.textMuted : t.text }}
+                          >
+                            {topic.name}
+                          </span>
+                          <span className="dashboard-syllabus__topic-status" style={{ color: STATUS_COLOR[status] }}>
+                            {meta.label}
+                          </span>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 function TopicRow({ topic, status, color, onCycle, t }) {
   const meta = STATUS[status];
   return (
     <button
       onClick={onCycle}
-      title="Click to advance status"
+      aria-label={`Chapter ${topic.order + 1}: ${topic.name}. Status: ${meta.label}. Click to update status.`}
+      title="Update chapter status"
+      className="syllabus-topic"
       style={{
-        display: "flex", alignItems: "center", gap: 12, width: "100%",
-        padding: "10px 12px", borderRadius: 10, border: `1px solid ${t.border}`,
-        background: t.surfaceRaised, cursor: "pointer", textAlign: "left",
-        marginBottom: 6,
+        "--topic-color": color,
+        "--topic-status-color": STATUS_COLOR[status],
+        borderColor: status === "not_started" ? t.border : `${STATUS_COLOR[status]}66`,
+        background: status === "completed" ? `${STATUS_COLOR[status]}0D` : t.surfaceRaised,
       }}
     >
       <span
         style={{
-          width: 20, height: 20, borderRadius: 6, flexShrink: 0,
+          width: 24, height: 24, borderRadius: 7, flexShrink: 0,
           border: `1.5px solid ${STATUS_COLOR[status]}`,
-          background: status === "completed" ? STATUS_COLOR[status] : "transparent",
+          background: status === "completed" ? STATUS_COLOR[status] : `${STATUS_COLOR[status]}18`,
           display: "flex", alignItems: "center", justifyContent: "center",
+          color: status === "completed" ? "#0F1419" : STATUS_COLOR[status],
         }}
       >
-        {status === "completed" && <Check size={13} color="#0F1419" strokeWidth={3} />}
+        {status === "completed" ? <Check size={14} strokeWidth={3} /> : status === "in_progress" ? <Clock size={13} /> : null}
       </span>
-      <span style={{ flex: 1, fontSize: 13.5, color: t.text, minWidth: 0 }}>{topic.name}</span>
+      <span className="syllabus-topic__content">
+        <span className="syllabus-topic__number" style={{ color: `${color}B8` }}>
+          CHAPTER {String(topic.order + 1).padStart(2, "0")}
+        </span>
+        <span className="syllabus-topic__name" style={{ color: t.text }}>{topic.name}</span>
+      </span>
       <span
+        className="syllabus-topic__status"
         style={{
           fontSize: 11, fontWeight: 600, letterSpacing: "0.02em",
           padding: "3px 9px", borderRadius: 999, flexShrink: 0,
@@ -777,6 +932,7 @@ function TopicRow({ topic, status, color, onCycle, t }) {
       >
         {meta.label}
       </span>
+      <ChevronRight className="syllabus-topic__chevron" size={15} />
     </button>
   );
 }
@@ -925,247 +1081,310 @@ function SyllabusView({ topicStatus, onCycleTopic, subjectProgress, overallProgr
    STUDY TIMER (Phase 3)
    --------------------------------------------------------------------------- */
 
-function TimerView({ onCompleteSession, t }) {
+const TIMER_MODES = [
+  { id: "timer", label: "Timer" },
+  { id: "pomodoro", label: "Pomodoro" },
+  { id: "stopwatch", label: "Stopwatch" },
+];
+
+function TimerView({ onCompleteSession, todayMinutes, t }) {
+  const [mode, setMode] = useState("timer");
   const [presetId, setPresetId] = useState("25-5");
   const [customMinutes, setCustomMinutes] = useState(30);
+  const [customBreakMinutes, setCustomBreakMinutes] = useState(5);
   const [subjectId, setSubjectId] = useState("physics");
-  const [topicId, setTopicId] = useState(ALL_TOPICS.find((x) => x.subjectId === "physics").id);
-
-  const focusMinutes = useMemo(() => {
-    const preset = TIMER_PRESETS.find((p) => p.id === presetId);
-    return preset.focusMin ?? customMinutes;
-  }, [presetId, customMinutes]);
-
-  const totalSeconds = focusMinutes * 60;
-
-  const [status, setStatus] = useState("idle"); // idle | running | paused | done
-  const [remaining, setRemaining] = useState(totalSeconds);
-  const [elapsedAtPause, setElapsedAtPause] = useState(0);
+  const [topicId, setTopicId] = useState(ALL_TOPICS.find((topic) => topic.subjectId === "physics").id);
+  const [status, setStatus] = useState("idle");
+  const [phase, setPhase] = useState("focus");
+  const [remaining, setRemaining] = useState(25 * 60);
+  const [stopwatchSeconds, setStopwatchSeconds] = useState(0);
   const [justSaved, setJustSaved] = useState(false);
 
-  // Reset the clock whenever duration changes while idle.
-  useEffect(() => {
-    if (status === "idle") {
-      setRemaining(totalSeconds);
-      setElapsedAtPause(0);
-    }
-  }, [totalSeconds, status]);
-
-  useEffect(() => {
-    if (status !== "running") return;
-    const interval = setInterval(() => {
-      setRemaining((prev) => {
-        if (prev <= 1) {
-          clearInterval(interval);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [status]);
-
-  useEffect(() => {
-    if (status === "running" && remaining === 0) {
-      finishSession(totalSeconds);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [remaining, status]);
-
-  const topicsForSubject = ALL_TOPICS.filter((tp) => tp.subjectId === subjectId);
-
-  function finishSession(elapsedSeconds) {
-    if (elapsedSeconds >= 60) {
-      const session = {
-        id: `session-${Date.now()}`,
-        subjectId,
-        topicId,
-        durationSec: elapsedSeconds,
-        startedAt: new Date(Date.now() - elapsedSeconds * 1000).toISOString(),
-        endedAt: new Date().toISOString(),
-        xpEarned: computeSessionXp(elapsedSeconds),
-      };
-      onCompleteSession(session);
-      setJustSaved(true);
-      setTimeout(() => setJustSaved(false), 2500);
-    }
-    setStatus("idle");
-    setRemaining(totalSeconds);
-    setElapsedAtPause(0);
-  }
-
-  function handleStart() {
-    setStatus("running");
-  }
-  function handlePause() {
-    setStatus("paused");
-    setElapsedAtPause(totalSeconds - remaining);
-  }
-  function handleResume() {
-    setStatus("running");
-  }
-  function handleStop() {
-    const elapsed = totalSeconds - remaining;
-    finishSession(elapsed);
-  }
-  function handleReset() {
-    setStatus("idle");
-    setRemaining(totalSeconds);
-    setElapsedAtPause(0);
-  }
-
-  const pct = Math.round(((totalSeconds - remaining) / totalSeconds) * 100);
-  const circumference = 2 * Math.PI * 90;
-  const dash = (pct / 100) * circumference;
+  const selectedPreset = TIMER_PRESETS.find((preset) => preset.id === presetId);
+  const focusMinutes = selectedPreset.focusMin ?? customMinutes;
+  const focusSeconds = focusMinutes * 60;
+  const breakSeconds = (selectedPreset.breakMin ?? customBreakMinutes) * 60;
+  const topicsForSubject = ALL_TOPICS.filter((topic) => topic.subjectId === subjectId);
+  const idle = status === "idle";
   const running = status === "running";
   const paused = status === "paused";
-  const idle = status === "idle";
+  const segmentSeconds = mode === "pomodoro" && phase === "break" ? breakSeconds : focusSeconds;
+  const elapsedSeconds = mode === "stopwatch" ? stopwatchSeconds : segmentSeconds - remaining;
+  const displaySeconds = mode === "stopwatch" ? stopwatchSeconds : remaining;
+  const progress = mode === "stopwatch"
+    ? (stopwatchSeconds % 60) / 60
+    : segmentSeconds > 0 ? Math.max(0, Math.min(1, elapsedSeconds / segmentSeconds)) : 0;
+  const circumference = 2 * Math.PI * 90;
+
+  const saveSession = useCallback((durationSec) => {
+    if (durationSec < 60) return;
+    const endedAt = new Date();
+    onCompleteSession({
+      id: `session-${Date.now()}`,
+      subjectId,
+      topicId,
+      durationSec,
+      startedAt: new Date(endedAt.getTime() - durationSec * 1000).toISOString(),
+      endedAt: endedAt.toISOString(),
+      xpEarned: computeSessionXp(durationSec),
+    });
+    setJustSaved(true);
+  }, [onCompleteSession, subjectId, topicId]);
+
+  useEffect(() => {
+    if (status !== "running") return undefined;
+    const interval = setInterval(() => {
+      if (mode === "stopwatch") {
+        setStopwatchSeconds((seconds) => seconds + 1);
+        return;
+      }
+
+      if (remaining > 1) {
+        setRemaining(remaining - 1);
+        return;
+      }
+
+      if (mode === "pomodoro") {
+        if (phase === "focus") {
+          saveSession(focusSeconds);
+          setPhase("break");
+          setRemaining(breakSeconds);
+        } else {
+          setPhase("focus");
+          setRemaining(focusSeconds);
+        }
+        return;
+      }
+
+      saveSession(focusSeconds);
+      setStatus("idle");
+      setRemaining(focusSeconds);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [breakSeconds, focusSeconds, mode, phase, remaining, saveSession, status]);
+
+  useEffect(() => {
+    if (!justSaved) return undefined;
+    const timeout = setTimeout(() => setJustSaved(false), 2500);
+    return () => clearTimeout(timeout);
+  }, [justSaved]);
+
+  function resetClock() {
+    setStatus("idle");
+    setPhase("focus");
+    setRemaining(focusSeconds);
+    setStopwatchSeconds(0);
+  }
+
+  function chooseMode(nextMode) {
+    if (!idle) return;
+    setMode(nextMode);
+    setPhase("focus");
+    setRemaining(focusSeconds);
+    setStopwatchSeconds(0);
+  }
+
+  function choosePreset(nextPreset) {
+    setPresetId(nextPreset.id);
+    setPhase("focus");
+    setRemaining((nextPreset.focusMin ?? customMinutes) * 60);
+  }
+
+  function stopClock() {
+    if (mode === "stopwatch") {
+      saveSession(stopwatchSeconds);
+    } else if (mode !== "pomodoro" || phase === "focus") {
+      saveSession(Math.max(0, segmentSeconds - remaining));
+    }
+    resetClock();
+  }
+
+  function changeSubject(nextSubjectId) {
+    setSubjectId(nextSubjectId);
+    setTopicId(ALL_TOPICS.find((topic) => topic.subjectId === nextSubjectId).id);
+  }
+
+  const activeLabel = mode === "pomodoro"
+    ? phase === "break" ? "Break time" : "Focus interval"
+    : mode === "stopwatch" ? "Stopwatch" : "Focus timer";
 
   return (
-    <div style={{ maxWidth: 620 }}>
-      <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 20, fontWeight: 700, marginBottom: 4 }}>
-        Focus Timer
-      </div>
-      <div style={{ fontSize: 13, color: t.textMuted, marginBottom: 20 }}>
-        Sessions save automatically once you cross a minute — subject, topic, duration and XP are logged.
+    <div
+      className="timer-page"
+      style={{
+        "--timer-border": t.border,
+        "--timer-surface": t.surface,
+        "--timer-surface-raised": t.surfaceRaised,
+        "--timer-text": t.text,
+        "--timer-text-muted": t.textMuted,
+        "--timer-accent": ACCENT,
+      }}
+    >
+      <div className="timer-page__heading">
+        <div>
+          <h1 className="timer-page__title">Focus room</h1>
+          <p className="timer-page__subtitle">Make this session count.</p>
+        </div>
+        <span className="timer-today" style={{ borderColor: t.border, color: t.textMuted }}>
+          Today <strong style={{ color: t.text }}>{formatMinutes(todayMinutes)}</strong>
+        </span>
       </div>
 
-      <div style={{ display: "flex", gap: 24, flexWrap: "wrap", alignItems: "flex-start" }}>
-        {/* Dial */}
-        <div style={{ position: "relative", width: 200, height: 200, flexShrink: 0 }}>
-          <svg width={200} height={200} viewBox="0 0 200 200">
-            <g transform="rotate(-90 100 100)">
-              <circle cx={100} cy={100} r={90} fill="none" stroke={t.border} strokeWidth={10} />
+      <section className="timer-panel">
+        <div className="timer-mode-switch" role="tablist" aria-label="Timer mode">
+          {TIMER_MODES.map((timerMode) => (
+            <button
+              key={timerMode.id}
+              type="button"
+              role="tab"
+              aria-selected={mode === timerMode.id}
+              disabled={!idle}
+              className={`timer-mode-switch__button${mode === timerMode.id ? " is-active" : ""}`}
+              onClick={() => chooseMode(timerMode.id)}
+            >
+              {timerMode.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="timer-workspace">
+          <div className="timer-dial" aria-label={`${formatClock(displaySeconds)} ${activeLabel}`}>
+            <svg viewBox="0 0 200 200" aria-hidden="true">
+              <circle cx="100" cy="100" r="90" fill="none" stroke={t.border} strokeWidth="9" />
               <circle
-                cx={100} cy={100} r={90} fill="none"
-                stroke={SUBJECTS[subjectId].color} strokeWidth={10}
-                strokeDasharray={`${dash} ${circumference}`} strokeLinecap="round"
-                style={{ transition: "stroke-dasharray 0.4s linear" }}
+                cx="100" cy="100" r="90" fill="none"
+                stroke={mode === "pomodoro" && phase === "break" ? "#00E699" : SUBJECTS[subjectId].color}
+                strokeWidth="9" strokeLinecap="round" strokeDasharray={circumference}
+                strokeDashoffset={circumference * (1 - progress)}
+                className="timer-dial__progress"
               />
-            </g>
-          </svg>
-          <div
-            style={{
-              position: "absolute", inset: 0, display: "flex", flexDirection: "column",
-              alignItems: "center", justifyContent: "center",
-            }}
-          >
-            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 32, fontWeight: 600, color: t.text }}>
-              {formatClock(remaining)}
-            </div>
-            <div style={{ fontSize: 11.5, color: t.textFaint, marginTop: 2, textTransform: "uppercase", letterSpacing: "0.05em" }}>
-              {idle ? "Ready" : running ? "Focusing" : paused ? "Paused" : "Done"}
+            </svg>
+            <div className="timer-dial__readout">
+              <div className="timer-dial__time" style={{ color: t.text }}>{formatClock(displaySeconds)}</div>
+              <div className="timer-dial__label" style={{ color: t.textFaint }}>
+                {paused ? "Paused" : running ? activeLabel : mode === "stopwatch" ? "Ready" : activeLabel}
+              </div>
             </div>
           </div>
-        </div>
 
-        {/* Controls + config */}
-        <div style={{ flex: 1, minWidth: 240 }}>
-          <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
-            {idle ? (
-              <TimerButton label="Start" primary onClick={handleStart} t={t} />
-            ) : running ? (
-              <>
-                <TimerButton label="Pause" onClick={handlePause} t={t} />
-                <TimerButton label="Stop" onClick={handleStop} t={t} />
-              </>
-            ) : (
-              <>
-                <TimerButton label="Resume" primary onClick={handleResume} t={t} />
-                <TimerButton label="Stop" onClick={handleStop} t={t} />
-              </>
+          <div className="timer-config">
+            <div className="timer-actions">
+              {idle ? (
+                <TimerButton label="Start" icon={Play} primary onClick={() => setStatus("running")} t={t} />
+              ) : running ? (
+                <TimerButton label="Pause" icon={Pause} onClick={() => setStatus("paused")} t={t} />
+              ) : (
+                <TimerButton label="Resume" icon={Play} primary onClick={() => setStatus("running")} t={t} />
+              )}
+              {!idle && <TimerButton label="Stop" onClick={stopClock} t={t} />}
+              <TimerButton label="Reset" icon={RotateCcw} onClick={resetClock} t={t} />
+              <div className="timer-xp" style={{ color: t.textMuted }}>
+                <Zap size={14} fill="currentColor" />
+                <span>Earn 1 XP per focused minute</span>
+              </div>
+            </div>
+
+            {justSaved && <div className="timer-saved" role="status">Session saved</div>}
+
+            {mode !== "stopwatch" && (
+              <div className="timer-presets" aria-label={mode === "pomodoro" ? "Pomodoro presets" : "Timer presets"}>
+                {TIMER_PRESETS.map((preset) => {
+                  const presetLabel = preset.id === "custom"
+                    ? "Custom"
+                    : mode === "pomodoro" ? preset.label : `${preset.focusMin} min`;
+                  return (
+                    <button
+                      key={preset.id}
+                      type="button"
+                      disabled={!idle}
+                      aria-pressed={presetId === preset.id}
+                      className={`timer-preset${presetId === preset.id ? " is-active" : ""}`}
+                      style={{ "--timer-accent": ACCENT }}
+                      onClick={() => choosePreset(preset)}
+                    >
+                      {presetLabel}
+                    </button>
+                  );
+                })}
+              </div>
             )}
-            <TimerButton label="Reset" onClick={handleReset} t={t} />
-          </div>
 
-          {justSaved && (
-            <div style={{ fontSize: 12, color: "#34C77B", marginBottom: 12, fontWeight: 600 }}>
-              Session saved ✓
+            {mode !== "stopwatch" && presetId === "custom" && (
+              <div className="timer-custom-durations">
+                <label>
+                  <span>Focus</span>
+                  <input
+                    type="number" min={1} max={180} disabled={!idle} value={customMinutes}
+                    aria-label="Focus duration in minutes"
+                    onChange={(event) => {
+                      const nextMinutes = Math.min(180, Math.max(1, Number(event.target.value) || 1));
+                      setCustomMinutes(nextMinutes);
+                      if (idle) setRemaining(nextMinutes * 60);
+                    }}
+                    style={{ borderColor: t.border, background: t.bg, color: t.text }}
+                  />
+                  <span>min</span>
+                </label>
+                {mode === "pomodoro" && (
+                  <label>
+                    <span>Break</span>
+                    <input
+                      type="number" min={1} max={60} disabled={!idle} value={customBreakMinutes}
+                      aria-label="Break duration in minutes"
+                      onChange={(event) => setCustomBreakMinutes(Math.min(60, Math.max(1, Number(event.target.value) || 1)))}
+                      style={{ borderColor: t.border, background: t.bg, color: t.text }}
+                    />
+                    <span>min</span>
+                  </label>
+                )}
+              </div>
+            )}
+
+            <div className="timer-subject-selects">
+              <label className="timer-select" style={{ color: t.textMuted }}>
+                <span>Subject</span>
+                <select
+                  value={subjectId} disabled={!idle}
+                  onChange={(event) => changeSubject(event.target.value)}
+                  style={{ "--select-border": t.border, "--select-background": t.bg, color: t.text }}
+                >
+                  {Object.values(SUBJECTS).map((subject) => (
+                    <option key={subject.id} value={subject.id}>{subject.name}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="timer-select" style={{ color: t.textMuted }}>
+                <span>Chapter</span>
+                <select
+                  value={topicId} disabled={!idle}
+                  onChange={(event) => setTopicId(event.target.value)}
+                  style={{ "--select-border": t.border, "--select-background": t.bg, color: t.text }}
+                >
+                  {topicsForSubject.map((topic) => (
+                    <option key={topic.id} value={topic.id}>{topic.name}</option>
+                  ))}
+                </select>
+              </label>
             </div>
-          )}
 
-          <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap" }}>
-            {TIMER_PRESETS.map((p) => (
-              <button
-                key={p.id}
-                disabled={!idle}
-                onClick={() => setPresetId(p.id)}
-                style={{
-                  padding: "6px 12px", borderRadius: 999, fontSize: 12.5, fontWeight: 600,
-                  border: `1px solid ${presetId === p.id ? ACCENT : t.border}`,
-                  background: presetId === p.id ? `${ACCENT}1A` : t.surface,
-                  color: presetId === p.id ? ACCENT : t.textMuted,
-                  cursor: idle ? "pointer" : "not-allowed", opacity: idle ? 1 : 0.6,
-                }}
-              >
-                {p.label}
-              </button>
-            ))}
-          </div>
-
-          {presetId === "custom" && (
-            <div style={{ marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{ fontSize: 12.5, color: t.textMuted }}>Duration</span>
-              <input
-                type="number" min={1} max={180} disabled={!idle}
-                value={customMinutes}
-                onChange={(e) => setCustomMinutes(Math.max(1, Number(e.target.value) || 1))}
-                style={{
-                  width: 64, padding: "6px 8px", borderRadius: 7,
-                  border: `1px solid ${t.border}`, background: t.surface, color: t.text, fontSize: 13,
-                }}
-              />
-              <span style={{ fontSize: 12.5, color: t.textFaint }}>min</span>
-            </div>
-          )}
-
-          <div style={{ display: "flex", gap: 8 }}>
-            <select
-              value={subjectId} disabled={!idle}
-              onChange={(e) => {
-                setSubjectId(e.target.value);
-                setTopicId(ALL_TOPICS.find((x) => x.subjectId === e.target.value).id);
-              }}
-              style={{
-                flex: 1, background: t.surface, border: `1px solid ${t.border}`, borderRadius: 9,
-                padding: "8px 10px", color: t.text, fontSize: 13, fontFamily: "inherit",
-              }}
-            >
-              {Object.values(SUBJECTS).map((s) => (
-                <option key={s.id} value={s.id}>{s.name}</option>
-              ))}
-            </select>
-            <select
-              value={topicId} disabled={!idle}
-              onChange={(e) => setTopicId(e.target.value)}
-              style={{
-                flex: 1.4, background: t.surface, border: `1px solid ${t.border}`, borderRadius: 9,
-                padding: "8px 10px", color: t.text, fontSize: 13, fontFamily: "inherit",
-              }}
-            >
-              {topicsForSubject.map((tp) => (
-                <option key={tp.id} value={tp.id}>{tp.name}</option>
-              ))}
-            </select>
+            {mode === "pomodoro" && <div className="timer-break-note" style={{ color: t.textFaint }}>Pomodoro breaks are not logged.</div>}
           </div>
         </div>
-      </div>
+      </section>
     </div>
   );
 }
 
-function TimerButton({ label, onClick, primary, t }) {
+function TimerButton({ label, onClick, primary, t, icon: Icon, disabled = false }) {
   return (
     <button
+      type="button"
       onClick={onClick}
-      style={{
-        padding: "9px 16px", borderRadius: 9, fontSize: 13, fontWeight: 600,
-        border: primary ? "none" : `1px solid ${t.border}`,
-        background: primary ? ACCENT : t.surface,
-        color: primary ? "#0F1419" : t.text,
-        cursor: "pointer",
-      }}
+      disabled={disabled}
+      className={`timer-action${primary ? " is-primary" : ""}`}
+      style={{ "--action-border": t.border, "--action-surface": t.surface }}
     >
+      {Icon && <Icon size={14} strokeWidth={2.5} />}
       {label}
     </button>
   );
@@ -1189,6 +1408,7 @@ function TaskRow({ task, onToggle, onDelete, t }) {
   const done = task.status === "done";
   return (
     <div
+      className="dashboard-empty-state"
       style={{
         display: "flex", alignItems: "center", gap: 10, padding: "10px 12px",
         borderRadius: 10, border: `1px solid ${t.border}`, background: t.surfaceRaised,
@@ -1200,8 +1420,8 @@ function TaskRow({ task, onToggle, onDelete, t }) {
         aria-label="Toggle done"
         style={{
           width: 20, height: 20, borderRadius: 6, flexShrink: 0, cursor: "pointer",
-          border: `1.5px solid ${done ? "#34C77B" : t.border}`,
-          background: done ? "#34C77B" : "transparent",
+          border: `1.5px solid ${done ? "#00E699" : t.border}`,
+          background: done ? "#00E699" : "transparent",
           display: "flex", alignItems: "center", justifyContent: "center",
         }}
       >
@@ -1359,7 +1579,7 @@ function PlanView({ tasks, onAddTask, onToggleTask, onDeleteTask, dailyGoalMinut
             {formatMinutes(todayMinutes)} / {formatMinutes(dailyGoalMinutes)}
           </span>
         </div>
-        <ProgressBar pct={goalPct} color={goalPct >= 100 ? "#34C77B" : ACCENT} t={t} height={7} />
+        <ProgressBar pct={goalPct} color={goalPct >= 100 ? "#00E699" : ACCENT} t={t} height={7} />
       </div>
 
       <AddTaskForm onAdd={onAddTask} t={t} />
@@ -1556,7 +1776,7 @@ function InstitutionOverview({ readNoticeIds, t }) {
           icon={Users} label="Attendance"
           value={`${overallAttendancePct}%`}
           sub={overallAttendancePct < ATTENDANCE_TARGET_PCT ? "below target" : "on track"}
-          accent={overallAttendancePct < ATTENDANCE_TARGET_PCT ? STREAK_ACCENT : "#34C77B"} t={t}
+          accent={overallAttendancePct < ATTENDANCE_TARGET_PCT ? STREAK_ACCENT : "#00E699"} t={t}
         />
         <StatCard
           icon={GraduationCap} label="Next exam"
@@ -1567,7 +1787,7 @@ function InstitutionOverview({ readNoticeIds, t }) {
         <StatCard
           icon={Bell} label="Notices" value={unreadCount}
           sub={unreadCount > 0 ? "unread" : "all caught up"}
-          accent={unreadCount > 0 ? "#F2635C" : "#34C77B"} t={t}
+          accent={unreadCount > 0 ? "#F2635C" : "#00E699"} t={t}
         />
       </div>
 
@@ -1680,11 +1900,11 @@ function InstitutionAttendance({ t }) {
       <div style={{ background: t.surface, border: `1px solid ${t.border}`, borderRadius: 14, padding: 20, marginBottom: 14 }}>
         <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 10 }}>
           <span style={{ fontSize: 13.5, fontWeight: 600 }}>Overall attendance</span>
-          <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 22, fontWeight: 700, color: overall < ATTENDANCE_TARGET_PCT ? STREAK_ACCENT : "#34C77B" }}>
+          <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 22, fontWeight: 700, color: overall < ATTENDANCE_TARGET_PCT ? STREAK_ACCENT : "#00E699" }}>
             {overall}%
           </span>
         </div>
-        <ProgressBar pct={overall} color={overall < ATTENDANCE_TARGET_PCT ? STREAK_ACCENT : "#34C77B"} t={t} height={8} />
+        <ProgressBar pct={overall} color={overall < ATTENDANCE_TARGET_PCT ? STREAK_ACCENT : "#00E699"} t={t} height={8} />
         {overall < ATTENDANCE_TARGET_PCT && (
           <div style={{ fontSize: 12, color: STREAK_ACCENT, marginTop: 8 }}>
             Below your {ATTENDANCE_TARGET_PCT}% target.
@@ -1723,6 +1943,7 @@ function InstitutionAttendance({ t }) {
 function NoticeCard({ notice, isRead, onMarkRead, t }) {
   return (
     <div
+      className="dashboard-task-row"
       style={{
         background: t.surface, border: `1px solid ${t.border}`, borderRadius: 12, padding: 15,
         marginBottom: 8, opacity: isRead ? 0.65 : 1,
@@ -1783,7 +2004,7 @@ function ExamCard({ exam, t }) {
           <span style={{ fontSize: 14, fontWeight: 600 }}>{exam.title}</span>
         </div>
         {exam.status === "completed" ? (
-          <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, fontWeight: 700, color: "#34C77B" }}>
+          <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, fontWeight: 700, color: "#00E699" }}>
             {exam.marks}/{exam.totalMarks}
           </span>
         ) : (
@@ -1936,7 +2157,7 @@ const INSTITUTION_SECTIONS = [
   { id: "materials", label: "Materials" },
 ];
 
-function InstitutionView({ readNoticeIds, onMarkNoticeRead, t }) {
+function LegacyInstitutionView({ readNoticeIds, onMarkNoticeRead, t }) {
   const [section, setSection] = useState("overview");
   const unreadCount = NOTICES.filter((n) => !readNoticeIds.includes(n.id)).length;
 
@@ -1971,23 +2192,50 @@ function InstitutionView({ readNoticeIds, onMarkNoticeRead, t }) {
   );
 }
 
+function InstitutionView({ readNoticeIds, onMarkNoticeRead, t }) {
+  if (isSupabaseConfigured) return <InstitutePortal t={t} />;
+  return <LegacyInstitutionView readNoticeIds={readNoticeIds} onMarkNoticeRead={onMarkNoticeRead} t={t} />;
+}
+
 /* ---------------------------------------------------------------------------
-   LOGIN GATE (demo only)
-   Nothing here is real authentication: any email/password is accepted, no
-   credential is checked or stored, and "logged in" is just a boolean flag
-   in storage. A real version would call a backend auth endpoint (and would
-   never store a password client-side at all).
+  LOGIN GATE
+  Email/password is verified by Supabase when configured. Without Supabase
+  configuration, the app retains its local demo login.
    --------------------------------------------------------------------------- */
 
 function LoginView({ onLogin, t }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [mode, setMode] = useState("login"); // "login" | "signup"
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
 
-  function handleSubmit(e) {
+  async function handleSubmit(e) {
     e.preventDefault();
-    // Demo only — no credential is actually verified.
-    onLogin(email || "student@example.com");
+    setBusy(true);
+    setError("");
+    setMessage("");
+    try {
+      const result = await onLogin(email, password, mode);
+      if (result?.message) setMessage(result.message);
+    } catch (loginError) {
+      setError(loginError.message || "Could not sign in. Please try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleGuestLogin() {
+    setBusy(true);
+    setError("");
+    try {
+      await onLogin("guest@example.com", "", "guest");
+    } catch (loginError) {
+      setError(loginError.message || "Could not continue as guest.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -2049,6 +2297,7 @@ function LoginView({ onLogin, t }) {
               <Mail size={14} color={t.textFaint} />
               <input
                 type="email"
+                required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="you@example.com"
@@ -2066,6 +2315,8 @@ function LoginView({ onLogin, t }) {
               <Lock size={14} color={t.textFaint} />
               <input
                 type="password"
+                required
+                minLength={6}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
@@ -2073,19 +2324,24 @@ function LoginView({ onLogin, t }) {
               />
             </div>
 
+            {error && <div role="alert" style={{ color: "#ff8585", fontSize: 12, marginBottom: 12 }}>{error}</div>}
+            {message && <div role="status" style={{ color: t.textMuted, fontSize: 12, marginBottom: 12 }}>{message}</div>}
+
             <button
               type="submit"
+              disabled={busy}
               style={{
                 width: "100%", padding: "11px 0", borderRadius: 9, border: "none",
-                background: ACCENT, color: "#0F1419", fontSize: 13.5, fontWeight: 700, cursor: "pointer",
+                background: ACCENT, color: "#0F1419", fontSize: 13.5, fontWeight: 700, cursor: busy ? "wait" : "pointer",
               }}
             >
-              {mode === "login" ? "Sign in" : "Create account"}
+              {busy ? "Please wait…" : mode === "login" ? "Sign in" : "Create account"}
             </button>
           </form>
 
           <button
-            onClick={() => onLogin("guest@example.com")}
+            onClick={handleGuestLogin}
+            disabled={busy}
             style={{
               width: "100%", marginTop: 10, padding: "10px 0", borderRadius: 9,
               border: `1px solid ${t.border}`, background: "transparent", color: t.textMuted,
@@ -2099,7 +2355,9 @@ function LoginView({ onLogin, t }) {
         <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, marginTop: 16 }}>
           <ShieldCheck size={12} color={t.textFaint} />
           <span style={{ fontSize: 11, color: t.textFaint }}>
-            Demo mode — no real accounts, nothing you type here is checked or stored securely.
+            {isSupabaseConfigured
+              ? "Your account is secured by Supabase."
+              : "Demo mode — configure Supabase to enable real accounts and cloud sync."}
           </span>
         </div>
       </div>
@@ -2117,146 +2375,355 @@ function LoginView({ onLogin, t }) {
 
 const PLANS = [
   {
-    id: "free", name: "Free", monthly: 0, yearly: 0,
-    tagline: "Get started with the core loop.",
-    features: ["Full JEE syllabus tracker", "Focus timer with presets", "Today's Plan & streaks", "Institution dashboard (read-only)"],
+    id: "free", name: "Free", portal: "student", prices: { month: 0 },
+    tagline: "A strong foundation for your study routine.",
+    features: [
+      "Core StudentOS Dashboard", "Syllabus & Subject Tracking", "Study Timer & Streaks",
+      "Basic Progress Tracking", "Test & Attendance Tracking", "Basic Analytics",
+      "XP & Gamification", "Limited Customization",
+    ],
   },
   {
-    id: "pro", name: "Pro", monthly: 299, yearly: 2499,
-    tagline: "For students serious about their prep.",
+    id: "pro", name: "Pro", portal: "student", prices: { month: 149, quarter: 399, year: 1299 },
+    tagline: "More insight and structure for serious preparation.",
     features: [
-      "Everything in Free", "Full Progress analytics & trends",
-      "Unlimited daily-plan tasks", "Priority-ranked study suggestions", "Custom timer presets",
+      "Everything in Free", "Advanced Performance Analytics", "Smart Study Planning",
+      "Detailed Progress Reports", "Weak Topic & Chapter Insights",
+      "Advanced Timetable & Revision Tools", "Full Customization & Themes", "Ad-Free Experience",
     ],
     highlighted: true,
   },
   {
-    id: "institute", name: "Institute", monthly: 999, yearly: 8999,
-    tagline: "For coaching institutes managing many students.",
+    id: "institute", name: "Institute Lite", portal: "institute", unitLabel: "per class",
+    prices: { month: 999, quarter: 2699, year: 9999 },
+    tagline: "The essentials for organized institute operations.",
     features: [
-      "Everything in Pro", "Institution-side notice & exam publishing",
-      "Batch-wide attendance & analytics", "Teacher accounts (coming soon)",
+      "Student & Teacher Management", "Classes & Batch Management", "Attendance & Test Attendance",
+      "Tests, Marks & Results", "Syllabus & Topic Tracking", "Timetable & Notices",
+      "Basic Reports & Analytics", "Student/Parent Access",
     ],
+  },
+  {
+    id: "institute-pro", name: "Institute Pro", portal: "institute", unitLabel: "per class",
+    prices: { month: 1499, quarter: 4199, year: 14999 },
+    tagline: "Deeper insight and control across your institute.",
+    features: [
+      "Everything in Lite", "Advanced Performance Analytics", "Detailed Student Reports",
+      "Rankings & Leaderboards", "Assignments & Study Material", "Advanced Parent Portal",
+      "Custom Modules & Dashboard", "Institute Branding & Permissions",
+    ],
+    highlighted: true,
   },
 ];
 
-function PlanCard({ plan, billing, isCurrent, onSelect, t }) {
-  const price = billing === "monthly" ? plan.monthly : plan.yearly;
-  const priceLabel = price === 0 ? "Free" : `₹${price.toLocaleString("en-IN")}`;
-  const period = price === 0 ? "" : billing === "monthly" ? "/month" : "/year";
+const PLAN_DURATIONS = [
+  { id: "month", label: "1 Month", period: "/ month" },
+  { id: "quarter", label: "3 Months", period: "/ 3 months" },
+  { id: "year", label: "1 Year", period: "/ year" },
+];
+
+function MagneticButton({ children, style = {}, onClick, disabled = false, type = "button", ...props }) {
+  const ref = useRef(null);
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+
+  const handlePointerMove = (event) => {
+    if (!ref.current || disabled) return;
+    const rect = ref.current.getBoundingClientRect();
+    const dx = event.clientX - (rect.left + rect.width / 2);
+    const dy = event.clientY - (rect.top + rect.height / 2);
+    setOffset({
+      x: dx * 0.18,
+      y: dy * 0.18,
+    });
+  };
+
+  const handleLeave = () => setOffset({ x: 0, y: 0 });
+
+  return (
+    <button
+      ref={ref}
+      type={type}
+      onClick={onClick}
+      disabled={disabled}
+      onPointerMove={handlePointerMove}
+      onPointerLeave={handleLeave}
+      onPointerCancel={handleLeave}
+      style={{
+        position: "relative",
+        overflow: "hidden",
+        transform: `translate(${offset.x}px, ${offset.y}px)`,
+        transition: "transform 220ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 220ms ease, filter 220ms ease",
+        boxShadow: `0 10px 24px rgba(0, 0, 0, 0.16)`,
+        willChange: "transform",
+        ...style,
+      }}
+      {...props}
+    >
+      <span
+        style={{
+          display: "inline-block",
+          transform: `translate(${offset.x * 0.7}px, ${offset.y * 0.7}px)`,
+          transition: "transform 220ms cubic-bezier(0.22, 1, 0.36, 1)",
+          willChange: "transform",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {children}
+      </span>
+    </button>
+  );
+}
+
+function AnimatedTabGroup({ items, activeId, onSelect, t }) {
+  const containerRef = useRef(null);
+  const buttonRefs = useRef({});
+  const [indicator, setIndicator] = useState({ top: 0, height: 0 });
+
+  useEffect(() => {
+    const container = containerRef.current;
+    const activeButton = buttonRefs.current[activeId];
+    if (!container || !activeButton) return;
+
+    const containerRect = container.getBoundingClientRect();
+    const activeRect = activeButton.getBoundingClientRect();
+    setIndicator({
+      top: activeRect.top - containerRect.top,
+      height: activeRect.height,
+    });
+  }, [activeId, t]);
 
   return (
     <div
+      ref={containerRef}
       style={{
-        flex: 1, minWidth: 220, background: t.surface, borderRadius: 16,
-        border: `1.5px solid ${plan.highlighted ? ACCENT : t.border}`,
-        padding: 22, display: "flex", flexDirection: "column", gap: 14, position: "relative",
+        position: "relative",
+        display: "flex",
+        flexDirection: "column",
+        gap: 2,
       }}
     >
-      {plan.highlighted && (
-        <span
-          style={{
-            position: "absolute", top: -11, left: 20, background: ACCENT, color: "#0F1419",
-            fontSize: 10.5, fontWeight: 700, padding: "3px 10px", borderRadius: 999,
-            display: "flex", alignItems: "center", gap: 4,
-          }}
-        >
-          <Sparkles size={11} /> Most popular
-        </span>
-      )}
-      <div>
-        <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 17, fontWeight: 700 }}>{plan.name}</div>
-        <div style={{ fontSize: 12, color: t.textMuted, marginTop: 3 }}>{plan.tagline}</div>
-      </div>
-      <div>
-        <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 26, fontWeight: 700 }}>{priceLabel}</span>
-        <span style={{ fontSize: 12.5, color: t.textMuted }}>{period}</span>
-      </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 8, flex: 1 }}>
-        {plan.features.map((f) => (
-          <div key={f} style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
-            <Check size={13} color="#34C77B" style={{ marginTop: 2, flexShrink: 0 }} />
-            <span style={{ fontSize: 12.5, color: t.text, lineHeight: 1.4 }}>{f}</span>
-          </div>
-        ))}
-      </div>
-      <button
-        onClick={() => onSelect(plan.id)}
-        disabled={isCurrent}
+      <div
         style={{
-          padding: "10px 0", borderRadius: 9, border: isCurrent ? `1px solid ${t.border}` : "none",
-          background: isCurrent ? "transparent" : plan.highlighted ? ACCENT : t.surfaceRaised,
-          color: isCurrent ? t.textMuted : plan.highlighted ? "#0F1419" : t.text,
-          fontSize: 13, fontWeight: 700, cursor: isCurrent ? "default" : "pointer",
+          position: "absolute",
+          left: 4,
+          right: 4,
+          top: indicator.top,
+          height: indicator.height || 32,
+          borderRadius: 8,
+          background: "rgba(255,255,255,0.02)",
+          border: `1px solid ${t.border}`,
+          boxShadow: "0 3px 10px rgba(15, 20, 25, 0.04)",
+          transition: "top 300ms ease, height 300ms ease, background 200ms ease",
         }}
-      >
-        {isCurrent ? "Current plan" : plan.id === "free" ? "Downgrade" : "Upgrade"}
-      </button>
+      />
+      {items.map((item) => {
+        const active = item.id === activeId;
+        return (
+          <button
+            key={item.id}
+            ref={(node) => { buttonRefs.current[item.id] = node; }}
+            onClick={() => onSelect(item.id)}
+            style={{
+              position: "relative",
+              zIndex: 1,
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              padding: "9px 10px",
+              borderRadius: 8,
+              border: "none",
+              background: "transparent",
+              color: active ? t.text : t.textMuted,
+              fontSize: 13,
+              fontWeight: active ? 600 : 500,
+              cursor: "pointer",
+              textAlign: "left",
+              width: "100%",
+              transition: "color 200ms ease, transform 200ms ease",
+            }}
+          >
+            <item.icon size={15} strokeWidth={2.1} />
+            <span style={{ flex: 1 }}>{item.label}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }
 
-function SubscriptionView({ currentPlan, onSelectPlan, t }) {
-  const [billing, setBilling] = useState("monthly");
-  const [justChanged, setJustChanged] = useState(null);
+function AnimatedChoiceGroup({ options, value, onChange, t, className = "" }) {
+  return (
+    <div
+      className={className}
+      style={{
+        display: "flex",
+        gap: 4,
+        margin: "18px 0 20px",
+        background: t.surface,
+        border: `1px solid ${t.border}`,
+        borderRadius: 9,
+        padding: 3,
+        width: "fit-content",
+      }}
+    >
+      {options.map((option) => {
+        const active = option.value === value;
+        return (
+          <MagneticButton
+            key={option.value}
+            className={className ? `${className}__option${active ? " is-active" : ""}` : undefined}
+            aria-pressed={active}
+            onClick={() => onChange(option.value)}
+            style={{
+              padding: "7px 16px",
+              borderRadius: 7,
+              border: "none",
+              cursor: "pointer",
+              fontSize: 12.5,
+              fontWeight: 600,
+              background: active ? t.surfaceRaised : "transparent",
+              color: active ? t.text : t.textMuted,
+              boxShadow: active ? "0 6px 14px rgba(15, 20, 25, 0.08)" : "none",
+              filter: "none",
+            }}
+          >
+            {option.label}
+          </MagneticButton>
+        );
+      })}
+    </div>
+  );
+}
 
-  function handleSelect(planId) {
-    onSelectPlan(planId);
-    setJustChanged(planId);
+function PlanCard({ plan, duration, isCurrent, onSelect, t }) {
+  const price = plan.prices[duration.id];
+  const period = price === 0 ? "Always free" : `${plan.unitLabel ? `${plan.unitLabel} ` : ""}${duration.period}`;
+  const actionLabel = plan.id === "free" ? "Get started" : plan.portal === "institute" ? "Get started" : "Upgrade";
+
+  return (
+    <div
+      className={`billing-plan-card${plan.highlighted ? " is-featured" : ""}${isCurrent ? " is-current" : ""}`}
+      style={{ "--billing-surface": t.surface, "--billing-raised": t.surfaceRaised, "--billing-border": t.border, "--billing-text": t.text, "--billing-muted": t.textMuted }}
+    >
+      {plan.highlighted && <span className="billing-plan-card__badge"><Sparkles size={11} />Recommended</span>}
+      <div className="billing-plan-card__heading">
+        <div>
+          <h2>{plan.name}</h2>
+          <p>{plan.tagline}</p>
+        </div>
+        {isCurrent && <span className="billing-plan-card__current">Current</span>}
+      </div>
+      <div className="billing-plan-card__price" aria-label={price === 0 ? "Free" : `₹${price.toLocaleString("en-IN")} ${period}`}>
+        {price === 0 ? <span className="billing-plan-card__free">Free</span> : (
+          <><span className="billing-plan-card__currency">₹</span><SlidingNumber value={price} locale="en-IN" /></>
+        )}
+        <span className="billing-plan-card__period">{period}</span>
+      </div>
+      <div className="billing-plan-card__divider" />
+      <ul className="billing-plan-card__features">
+        {plan.features.map((feature) => (
+          <li key={feature}><Check size={14} /><span>{feature}</span></li>
+        ))}
+      </ul>
+      <MagneticButton
+        className={`billing-plan-card__cta${plan.highlighted ? " is-primary" : ""}`}
+        onClick={() => onSelect(plan.id, duration.id)}
+        disabled={isCurrent}
+        style={{ "--billing-border": t.border, "--billing-raised": t.surfaceRaised }}
+      >
+        {isCurrent ? "Current plan" : actionLabel}
+      </MagneticButton>
+    </div>
+  );
+}
+
+function SubscriptionView({ currentPlan, currentDuration = "month", onSelectPlan, t }) {
+  const [portal, setPortal] = useState("student");
+  const initialDuration = PLAN_DURATIONS.some((option) => option.id === currentDuration) ? currentDuration : "month";
+  const [studentDuration, setStudentDuration] = useState(initialDuration);
+  const [instituteDuration, setInstituteDuration] = useState(initialDuration);
+  const [justChanged, setJustChanged] = useState(null);
+  const durationId = portal === "student" ? studentDuration : instituteDuration;
+  const duration = PLAN_DURATIONS.find((option) => option.id === durationId) || PLAN_DURATIONS[0];
+  const visiblePlans = PLANS.filter((plan) => plan.portal === portal);
+
+  function handleSelect(planId, selectedDuration) {
+    onSelectPlan(planId, selectedDuration);
+    if (portal === "student") setStudentDuration(selectedDuration);
+    else setInstituteDuration(selectedDuration);
+    setJustChanged({ planId, duration: selectedDuration });
     setTimeout(() => setJustChanged(null), 3000);
   }
 
   return (
-    <div>
-      <div style={{ marginBottom: 6 }}>
-        <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 20, fontWeight: 700 }}>
-          Plans & Billing
+    <div className="billing-page" style={{ "--billing-accent": ACCENT, "--billing-mint": "#00E699", "--billing-border": t.border, "--billing-surface": t.surface, "--billing-raised": t.surfaceRaised, "--billing-text": t.text, "--billing-muted": t.textMuted }}>
+      <header className="billing-page__heading">
+        <div>
+          <p className="billing-page__eyebrow">Flexible plans</p>
+          <h1>Plans & Billing</h1>
+          <p>Choose a workspace for your learning or institute.</p>
         </div>
-        <div style={{ fontSize: 12.5, color: t.textMuted, marginTop: 2 }}>
-          Demo only — no payment is processed and nothing is charged.
-        </div>
+        <span className="billing-demo-note"><ShieldCheck size={13} />Demo only · no payment is processed</span>
+      </header>
+
+      <div className="billing-portal-switch" role="tablist" aria-label="Choose a plan portal">
+        <span className={`billing-portal-switch__indicator${portal === "institute" ? " is-institute" : ""}`} />
+        <MagneticButton
+          role="tab"
+          aria-selected={portal === "student"}
+          className={`billing-portal-switch__button${portal === "student" ? " is-active" : ""}`}
+          onClick={() => setPortal("student")}
+          style={{ "--billing-border": t.border }}
+        >
+          Student
+        </MagneticButton>
+        <MagneticButton
+          role="tab"
+          aria-selected={portal === "institute"}
+          className={`billing-portal-switch__button${portal === "institute" ? " is-active" : ""}`}
+          onClick={() => setPortal("institute")}
+          style={{ "--billing-border": t.border }}
+        >
+          Institute
+        </MagneticButton>
       </div>
 
-      <div style={{ display: "flex", gap: 4, margin: "18px 0 20px", background: t.surface, border: `1px solid ${t.border}`, borderRadius: 9, padding: 3, width: "fit-content" }}>
-        {["monthly", "yearly"].map((b) => (
-          <button
-            key={b}
-            onClick={() => setBilling(b)}
-            style={{
-              padding: "7px 16px", borderRadius: 7, border: "none", cursor: "pointer",
-              fontSize: 12.5, fontWeight: 600,
-              background: billing === b ? t.surfaceRaised : "transparent",
-              color: billing === b ? t.text : t.textMuted,
-            }}
-          >
-            {b === "monthly" ? "Monthly" : "Yearly (save ~30%)"}
-          </button>
-        ))}
+      <div className="billing-duration-heading">
+        <div><h2>{portal === "student" ? "Student plans" : "Institute plans"}</h2><p>{portal === "student" ? "Pro term selection" : "Pricing per class"}</p></div>
+        <AnimatedChoiceGroup
+          className="billing-duration-toggle"
+          options={PLAN_DURATIONS.map((option) => ({ value: option.id, label: option.label }))}
+          value={duration.id}
+          onChange={(nextDuration) => portal === "student" ? setStudentDuration(nextDuration) : setInstituteDuration(nextDuration)}
+          t={t}
+        />
       </div>
 
       {justChanged && (
-        <div
-          style={{
-            background: `${"#34C77B"}1A`, border: "1px solid #34C77B", color: "#34C77B",
-            borderRadius: 9, padding: "9px 14px", fontSize: 12.5, fontWeight: 600, marginBottom: 16,
-          }}
-        >
-          You're now on {PLANS.find((p) => p.id === justChanged).name} (demo only — nothing was charged).
+        <div className="billing-confirmation" role="status">
+          <Check size={14} />{PLANS.find((plan) => plan.id === justChanged.planId)?.name} · {PLAN_DURATIONS.find((option) => option.id === justChanged.duration)?.label} selected. Demo only; nothing was charged.
         </div>
       )}
 
-      <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
-        {PLANS.map((plan) => (
+      <AnimatedGroup
+        key={portal}
+        variants={{
+          container: { hidden: { opacity: 0 }, visible: { opacity: 1, transition: { staggerChildren: 0.09 } } },
+          item: { hidden: { opacity: 0, y: 18, filter: "blur(3px)" }, visible: { opacity: 1, y: 0, filter: "blur(0px)", transition: { duration: 0.48, type: "spring", bounce: 0.16 } } },
+        }}
+        className="billing-plan-grid"
+      >
+        {visiblePlans.map((plan) => (
           <PlanCard
             key={plan.id}
             plan={plan}
-            billing={billing}
-            isCurrent={currentPlan === plan.id}
+            duration={duration}
+            isCurrent={currentPlan === plan.id && (plan.id === "free" || currentDuration === duration.id)}
             onSelect={handleSelect}
             t={t}
           />
         ))}
-      </div>
+      </AnimatedGroup>
     </div>
   );
 }
@@ -2273,14 +2740,13 @@ export default function StudentOS() {
   const [tasks, setTasks] = useState([]);
   const [readNoticeIds, setReadNoticeIds] = useState([]);
   const [auth, setAuth] = useState(DEFAULT_AUTH);
+  const [titleSystem, setTitleSystem] = useState(DEFAULT_TITLE_SYSTEM);
   const [activeTab, setActiveTab] = useState("dashboard");
 
   useEffect(() => {
     let mounted = true;
     (async () => {
-      const [p, ts, s, tk, rn, a] = await Promise.all([
-        db.getProfile(), db.getTopicStatus(), db.getSessions(), db.getTasks(), db.getReadNotices(), db.getAuth(),
-      ]);
+      const [p, ts, s, tk, rn, a, titleData] = await loadAppData();
       if (!mounted) return;
       setProfile(p);
       setTopicStatus(ts);
@@ -2288,6 +2754,7 @@ export default function StudentOS() {
       setTasks(tk);
       setReadNoticeIds(rn);
       setAuth(a);
+      setTitleSystem(titleData);
       setLoading(false);
     })();
     return () => { mounted = false; };
@@ -2347,24 +2814,49 @@ export default function StudentOS() {
     });
   }, []);
 
-  // DEMO ONLY — sets a "logged in" flag and the typed email, nothing else.
-  // No credential is verified. See db.getAuth/saveAuth above for the caveat.
-  const handleLogin = useCallback((email) => {
+  const handleLogin = useCallback(async (email, password, mode = "login") => {
+    if (mode !== "guest" && isSupabaseConfigured) {
+      const { data, error } = mode === "signup"
+        ? await supabase.auth.signUp({ email, password })
+        : await supabase.auth.signInWithPassword({ email, password });
+      if (error) throw error;
+      if (!data.session) {
+        return { message: "Check your email to confirm your account, then sign in." };
+      }
+
+      setLoading(true);
+      const [p, ts, s, tk, rn, , titleData] = await loadAppData();
+      setProfile(p);
+      setTopicStatus(ts);
+      setSessions(s);
+      setTasks(tk);
+      setReadNoticeIds(rn);
+      setTitleSystem(titleData);
+      const next = { loggedIn: true, email: data.user.email };
+      setAuth(next);
+      setLoading(false);
+      return;
+    }
+
     const next = { loggedIn: true, email };
     setAuth(next);
     db.saveAuth(next);
   }, []);
 
-  const handleLogout = useCallback(() => {
+  const handleLogout = useCallback(async () => {
+    if (isSupabaseConfigured) {
+      const { error } = await supabase.auth.signOut();
+      if (error) console.error("Could not sign out of Supabase", error);
+    }
     const next = { loggedIn: false, email: null };
     setAuth(next);
-    db.saveAuth(next);
+    if (!isSupabaseConfigured) db.saveAuth(next);
   }, []);
 
   // DEMO ONLY — no payment is processed. This just labels the profile.
-  const handleSelectPlan = useCallback((planId) => {
+  const handleSelectPlan = useCallback((planId, duration = "month") => {
     setProfile((prev) => {
-      const next = { ...prev, plan: planId };
+      const next = { ...prev, plan: planId, planDuration: duration };
       db.saveProfile(next);
       return next;
     });
@@ -2415,6 +2907,125 @@ export default function StudentOS() {
   }, []);
 
   const t = THEMES[profile.theme] || THEMES.dark;
+  const activeEmail = (auth.email || "").trim().toLowerCase();
+  const isOwner = Boolean(OWNER_EMAIL && activeEmail === OWNER_EMAIL);
+  const currentMember = titleSystem.members[activeEmail] || EMPTY_MEMBER;
+  const role = isOwner ? "owner" : ROLE_IDS.includes(currentMember.role) && currentMember.role !== "owner" ? currentMember.role : "student";
+  const grantedTitleIds = currentMember.grantedTitleIds || EMPTY_MEMBER.grantedTitleIds;
+  const titles = [
+    ...DEFAULT_TITLES,
+    ...(titleSystem.customTitles || []),
+  ].map((title) => {
+    const resolved = { ...title, ...(titleSystem.overrides[title.id] || {}) };
+    return { ...resolved, rarity: normalizeRarity(resolved.rarity) };
+  });
+  const selectedTitle = titles.find((title) => title.id === profile.activeTitleId);
+  const defaultTeacherTitle = titles.find((title) => title.id === "founders-mentor");
+  const currentTitle = isOwner
+    ? titles.find((title) => title.id === "architect")
+    : selectedTitle && isTitleUnlocked(selectedTitle, { role, xp: profile.xp, grantedTitleIds })
+      ? { ...selectedTitle, ownerGranted: grantedTitleIds.includes(selectedTitle.id) }
+      : role === "teacher" && defaultTeacherTitle
+        ? defaultTeacherTitle
+        : null;
+
+  const updateTitleSystem = useCallback((update) => {
+    setTitleSystem((previous) => {
+      const next = update(previous);
+      db.saveTitleSystem(next);
+      return next;
+    });
+  }, []);
+
+  const handleEquipTitle = useCallback((titleId) => {
+    if (isOwner) return;
+    const title = titles.find((entry) => entry.id === titleId);
+    if (!isTitleUnlocked(title, { role, xp: profile.xp, grantedTitleIds })) return;
+    setProfile((previous) => {
+      const next = { ...previous, activeTitleId: titleId };
+      db.saveProfile(next);
+      return next;
+    });
+  }, [isOwner, titles, role, profile.xp, grantedTitleIds]);
+
+  const handleUpdateProfileName = useCallback((name) => {
+    setProfile((previous) => {
+      const next = { ...previous, name: name.trim() || "Student" };
+      db.saveProfile(next);
+      return next;
+    });
+  }, []);
+
+  const handleSaveMember = useCallback(({ email, name, role: memberRole }) => {
+    if (!isOwner || email === OWNER_EMAIL || !["student", "teacher", "admin"].includes(memberRole)) return;
+    updateTitleSystem((previous) => ({
+      ...previous,
+      members: {
+        ...previous.members,
+        [email]: {
+          ...(previous.members[email] || {}),
+          name: name || email.split("@")[0],
+          role: memberRole,
+          grantedTitleIds: previous.members[email]?.grantedTitleIds || [],
+        },
+      },
+    }));
+  }, [isOwner, updateTitleSystem]);
+
+  const handleToggleGrant = useCallback((email, titleId, shouldGrant) => {
+    if (!isOwner || email === OWNER_EMAIL) return;
+    const title = titles.find((entry) => entry.id === titleId);
+    const member = titleSystem.members[email];
+    if (!title?.manuallyGranted || title.ownerOnly || title.category === "owner-exclusive" || !member) return;
+    if (title.category === "teacher" && member.role !== "teacher") return;
+    updateTitleSystem((previous) => {
+      const granted = new Set(previous.members[email]?.grantedTitleIds || []);
+      if (shouldGrant) granted.add(titleId);
+      else granted.delete(titleId);
+      return {
+        ...previous,
+        members: {
+          ...previous.members,
+          [email]: { ...previous.members[email], grantedTitleIds: [...granted] },
+        },
+      };
+    });
+  }, [isOwner, titles, titleSystem.members, updateTitleSystem]);
+
+  const handleUpdateTitle = useCallback((titleId, changes) => {
+    const title = titles.find((entry) => entry.id === titleId);
+    if (!isOwner || !title) return;
+    const safeChanges = title.ownerOnly ? { name: changes.name, description: changes.description } : changes;
+    updateTitleSystem((previous) => ({
+      ...previous,
+      overrides: { ...previous.overrides, [titleId]: { ...previous.overrides[titleId], ...safeChanges } },
+    }));
+  }, [isOwner, titles, updateTitleSystem]);
+
+  const handleCreateTitle = useCallback((title) => {
+    if (!isOwner || !["inner-circle", "teacher", "xp", "perks"].includes(title.category)) return;
+    updateTitleSystem((previous) => ({ ...previous, customTitles: [...previous.customTitles, title] }));
+  }, [isOwner, updateTitleSystem]);
+
+  const handleRemoveTitle = useCallback((titleId) => {
+    if (!isOwner || !titleId.startsWith("custom-")) return;
+    updateTitleSystem((previous) => ({
+      ...previous,
+      customTitles: previous.customTitles.filter((title) => title.id !== titleId),
+      overrides: Object.fromEntries(Object.entries(previous.overrides).filter(([id]) => id !== titleId)),
+      members: Object.fromEntries(Object.entries(previous.members).map(([email, member]) => [
+        email,
+        { ...member, grantedTitleIds: (member.grantedTitleIds || []).filter((id) => id !== titleId) },
+      ])),
+    }));
+    if (profile.activeTitleId === titleId) {
+      setProfile((previous) => {
+        const next = { ...previous, activeTitleId: null };
+        db.saveProfile(next);
+        return next;
+      });
+    }
+  }, [isOwner, updateTitleSystem, profile.activeTitleId]);
 
   const subjectProgress = useMemo(() => {
     const out = {};
@@ -2563,36 +3174,20 @@ export default function StudentOS() {
             display: "flex", flexDirection: "column", gap: 2, flexShrink: 0,
           }}
         >
-          {NAV_ITEMS.map((item) => {
-            const active = activeTab === item.id;
-            const locked = false;
-            return (
-              <button
-                key={item.id}
-                onClick={() => setActiveTab(item.id)}
-                style={{
-                  display: "flex", alignItems: "center", gap: 10,
-                  padding: "9px 10px", borderRadius: 8, border: "none",
-                  background: active ? t.surfaceRaised : "transparent",
-                  color: active ? t.text : t.textMuted,
-                  fontSize: 13, fontWeight: active ? 600 : 500,
-                  cursor: "pointer", textAlign: "left", width: "100%",
-                }}
-              >
-                <item.icon size={15} strokeWidth={2.1} />
-                <span style={{ flex: 1 }}>{item.label}</span>
-                {locked && (
-                  <span style={{ fontSize: 9.5, color: t.textFaint, fontWeight: 600 }}>
-                    P{item.phase}
-                  </span>
-                )}
-              </button>
-            );
-          })}
+          <AnimatedTabGroup
+            items={NAV_ITEMS}
+            activeId={activeTab}
+            onSelect={setActiveTab}
+            t={t}
+          />
         </div>
 
         {/* Main content */}
-        <div style={{ flex: 1, padding: "22px 24px", overflowY: "auto" }}>
+        <div
+          className={activeTab === "dashboard" ? "dashboard-view" : undefined}
+          data-theme={profile.theme}
+          style={{ flex: 1, padding: "22px 24px", overflowY: "auto" }}
+        >
           {activeTab === "institution" ? (
             <InstitutionView
               readNoticeIds={readNoticeIds}
@@ -2608,7 +3203,11 @@ export default function StudentOS() {
               t={t}
             />
           ) : activeTab === "timer" ? (
-            <TimerView onCompleteSession={handleCompleteSession} t={t} />
+            <TimerView
+              onCompleteSession={handleCompleteSession}
+              todayMinutes={todayMinutes}
+              t={t}
+            />
           ) : activeTab === "plan" ? (
             <PlanView
               tasks={todayTasks}
@@ -2630,25 +3229,48 @@ export default function StudentOS() {
               streak={streak}
               t={t}
             />
+          ) : activeTab === "titles" ? (
+            <TitlesView
+              profile={profile}
+              role={role}
+              email={activeEmail}
+              title={currentTitle}
+              titles={titles}
+              titleSystem={titleSystem}
+              isOwner={isOwner}
+              theme={profile.theme}
+              onEquipTitle={handleEquipTitle}
+              onSaveMember={handleSaveMember}
+              onToggleGrant={handleToggleGrant}
+              onUpdateTitle={handleUpdateTitle}
+              onCreateTitle={handleCreateTitle}
+              onRemoveTitle={handleRemoveTitle}
+              onUpdateProfileName={handleUpdateProfileName}
+              t={t}
+            />
           ) : activeTab === "subscription" ? (
-            <SubscriptionView currentPlan={profile.plan} onSelectPlan={handleSelectPlan} t={t} />
+            <SubscriptionView currentPlan={profile.plan} currentDuration={profile.planDuration} onSelectPlan={handleSelectPlan} t={t} />
           ) : activeTab !== "dashboard" ? (
             <PhasePlaceholder tab={activeTab} t={t} />
           ) : (
             <>
-              <div style={{ marginBottom: 20 }}>
-                <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 20, fontWeight: 700 }}>
-                  {greeting()}, {profile.name}.
+              <div className="dashboard-intro" style={{ marginBottom: 20 }}>
+                <div className="dashboard-greeting">
+                  {greeting()}, <span>{profile.name}</span>.
                 </div>
-                <div style={{ fontSize: 13, color: t.textMuted, marginTop: 2 }}>
+                <div className="dashboard-summary" style={{ fontSize: 13, color: t.textMuted, marginTop: 2 }}>
                   {overallProgress > 0
                     ? `${overallProgress}% of the JEE syllabus covered so far.`
                     : "Head to Syllabus to start marking topics, or Timer to log your first session."}
+                </div>
+                <div style={{ marginTop: 11 }}>
+                  <ProfileIdentity profile={profile} role={role} title={currentTitle} t={t} theme={profile.theme} compact />
                 </div>
               </div>
 
               {/* Stat row */}
               <div
+                className="dashboard-stat-grid"
                 style={{
                   display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
                   gap: 12, marginBottom: 20,
@@ -2660,23 +3282,22 @@ export default function StudentOS() {
                 <StatCard icon={Zap} label="XP" value={profile.xp} sub="total earned" accent={ACCENT} t={t} />
               </div>
 
-              {/* Rings + panels */}
-              <div style={{ display: "grid", gridTemplateColumns: "minmax(280px, 1fr) minmax(240px, 1fr)", gap: 14 }}>
-                <div style={{ background: t.surface, border: `1px solid ${t.border}`, borderRadius: 14, padding: 20 }}>
-                  <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 16 }}>
-                    <span style={{ fontSize: 13.5, fontWeight: 600 }}>Syllabus coverage</span>
-                    <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 12.5, color: t.textMuted }}>
-                      {ALL_TOPICS.length} topics
-                    </span>
-                  </div>
-                  <SubjectRings progress={subjectProgress} t={t} />
-                </div>
+              {/* Syllabus + panels */}
+              <div className="dashboard-panels">
+                <DashboardSyllabusCard
+                  topicStatus={topicStatus}
+                  onCycleTopic={handleCycleTopic}
+                  subjectProgress={subjectProgress}
+                  overallProgress={overallProgress}
+                  t={t}
+                />
 
                 <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                  <div style={{ background: t.surface, border: `1px solid ${t.border}`, borderRadius: 14, padding: 18 }}>
+                  <div className="dashboard-side-panel" style={{ background: t.surface, border: `1px solid ${t.border}`, borderRadius: 14, padding: 18 }}>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
                       <span style={{ fontSize: 13.5, fontWeight: 600 }}>Today's plan</span>
                       <button
+                        className="dashboard-panel-link"
                         onClick={() => setActiveTab("plan")}
                         style={{ border: "none", background: "transparent", cursor: "pointer", display: "flex", padding: 0 }}
                         aria-label="Open Today's Plan"
@@ -2699,10 +3320,11 @@ export default function StudentOS() {
                     )}
                   </div>
 
-                  <div style={{ background: t.surface, border: `1px solid ${t.border}`, borderRadius: 14, padding: 18 }}>
+                  <div className="dashboard-side-panel" style={{ background: t.surface, border: `1px solid ${t.border}`, borderRadius: 14, padding: 18 }}>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
                       <span style={{ fontSize: 13.5, fontWeight: 600 }}>Recent sessions</span>
                       <button
+                        className="dashboard-panel-link"
                         onClick={() => setActiveTab("timer")}
                         style={{ border: "none", background: "transparent", cursor: "pointer", display: "flex", padding: 0 }}
                         aria-label="Open Timer"
@@ -2723,6 +3345,7 @@ export default function StudentOS() {
                         return (
                           <div
                             key={s.id}
+                            className="dashboard-session-row"
                             style={{
                               display: "flex", alignItems: "center", gap: 10, padding: "8px 0",
                               borderBottom: `1px solid ${t.border}`,
