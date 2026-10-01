@@ -1,184 +1,597 @@
-.counter {
-  font-size: 16px;
-  padding: 5px 10px;
-  border-radius: 5px;
-  color: var(--accent);
-  background: var(--accent-bg);
-  border: 2px solid transparent;
-  transition: border-color 0.3s;
-  margin-bottom: 24px;
+/* ==========================================================================
+   StudentOS — Modern SaaS UI System
+   Integrated from:
+   • StudentOS dashboard polish
+   • Clean modern/template-style UI
+   • Subtle depth + restrained motion
+   Zero logic changes — UI only.
+   ========================================================================== */
 
-  &:hover {
-    border-color: var(--accent-border);
-  }
-  &:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: 2px;
-  }
+/* ==========================================================================
+   1. DESIGN TOKENS
+   ========================================================================== */
+
+:root {
+  --radius-xs: 6px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+
+  --transition-fast: 160ms cubic-bezier(0.16, 1, 0.3, 1);
+  --transition-smooth: 240ms cubic-bezier(0.16, 1, 0.3, 1);
+  --transition-slow: 420ms cubic-bezier(0.16, 1, 0.3, 1);
+
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+
+  --accent: #ff5e3a;
+  --accent-soft: rgba(255, 94, 58, 0.10);
+  --accent-border: rgba(255, 94, 58, 0.28);
+
+  --streak: #ff5d73;
+  --streak-soft: rgba(255, 93, 115, 0.12);
 }
 
-.hero {
+
+/* ==========================================================================
+   2. DARK THEME
+   ========================================================================== */
+
+[data-theme="dark"] {
+  --shadow-subtle:
+    0 2px 8px rgba(0, 0, 0, 0.25);
+
+  --shadow-card:
+    0 8px 24px -8px rgba(0, 0, 0, 0.45),
+    0 1px 3px rgba(0, 0, 0, 0.25);
+
+  --shadow-hover:
+    0 14px 32px -10px rgba(0, 0, 0, 0.55),
+    0 0 0 1px rgba(255, 255, 255, 0.06);
+
+  --glass-surface:
+    rgba(19, 18, 31, 0.82);
+
+  --glass-border:
+    rgba(255, 255, 255, 0.07);
+
+  --row-hover:
+    rgba(255, 255, 255, 0.035);
+
+  --press:
+    rgba(255, 255, 255, 0.07);
+}
+
+
+/* ==========================================================================
+   3. LIGHT THEME
+   ========================================================================== */
+
+[data-theme="light"] {
+  --shadow-subtle:
+    0 2px 8px rgba(15, 23, 42, 0.035);
+
+  --shadow-card:
+    0 8px 24px -8px rgba(15, 23, 42, 0.07),
+    0 1px 3px rgba(15, 23, 42, 0.035);
+
+  --shadow-hover:
+    0 14px 32px -10px rgba(15, 23, 42, 0.10),
+    0 0 0 1px rgba(15, 23, 42, 0.06);
+
+  --glass-surface:
+    rgba(255, 255, 255, 0.88);
+
+  --glass-border:
+    rgba(15, 23, 42, 0.07);
+
+  --row-hover:
+    rgba(15, 23, 42, 0.03);
+
+  --press:
+    rgba(15, 23, 42, 0.05);
+}
+
+
+/* ==========================================================================
+   4. GLOBAL POLISH
+   ========================================================================== */
+
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: var(--accent-soft);
+  color: inherit;
+}
+
+*::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: rgba(128, 128, 140, 0.28);
+  border-radius: 999px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(128, 128, 140, 0.45);
+}
+
+
+/* ==========================================================================
+   5. DASHBOARD STAT CARDS
+   ========================================================================== */
+
+.dashboard-stat-grid > div {
   position: relative;
+  overflow: hidden;
 
-  .base,
-  .framework,
-  .vite {
-    inset-inline: 0;
-    margin: 0 auto;
+  border-radius: var(--radius-lg);
+
+  box-shadow: var(--shadow-card);
+
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+
+  transition:
+    transform var(--transition-smooth),
+    box-shadow var(--transition-smooth),
+    border-color var(--transition-fast);
+
+  animation: riseIn 480ms var(--ease-out-expo) backwards;
+
+  will-change: transform;
+}
+
+.dashboard-stat-grid > div::before {
+  content: "";
+
+  position: absolute;
+  inset: 0;
+
+  pointer-events: none;
+
+  background:
+    radial-gradient(
+      circle at top left,
+      rgba(255, 255, 255, 0.045),
+      transparent 65%
+    );
+}
+
+.dashboard-stat-grid > div:hover {
+  transform: translateY(-2px);
+
+  box-shadow: var(--shadow-hover);
+
+  border-color: var(--accent-border);
+}
+
+.dashboard-stat-grid > div:nth-child(1) {
+  animation-delay: 40ms;
+}
+
+.dashboard-stat-grid > div:nth-child(2) {
+  animation-delay: 90ms;
+}
+
+.dashboard-stat-grid > div:nth-child(3) {
+  animation-delay: 140ms;
+}
+
+.dashboard-stat-grid > div:nth-child(4) {
+  animation-delay: 190ms;
+}
+
+
+/* ==========================================================================
+   6. ENTRY ANIMATIONS
+   ========================================================================== */
+
+@keyframes riseIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
   }
 
-  .base {
-    width: 170px;
-    position: relative;
-    z-index: 0;
-  }
-
-  .framework,
-  .vite {
-    position: absolute;
-  }
-
-  .framework {
-    z-index: 1;
-    top: 34px;
-    height: 28px;
-    transform: perspective(2000px) rotateZ(300deg) rotateX(44deg) rotateY(39deg)
-      scale(1.4);
-  }
-
-  .vite {
-    z-index: 0;
-    top: 107px;
-    height: 26px;
-    width: auto;
-    transform: perspective(2000px) rotateZ(300deg) rotateX(40deg) rotateY(39deg)
-      scale(0.8);
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 
-#center {
-  display: flex;
-  flex-direction: column;
-  gap: 25px;
-  place-content: center;
-  place-items: center;
-  flex-grow: 1;
+@keyframes fadeSlideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-5px);
+  }
 
-  @media (max-width: 1024px) {
-    padding: 32px 20px 24px;
-    gap: 18px;
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 
-#next-steps {
-  display: flex;
-  border-top: 1px solid var(--border);
-  text-align: left;
 
-  & > div {
-    flex: 1 1 0;
-    padding: 32px;
-    @media (max-width: 1024px) {
-      padding: 24px 20px;
-    }
+/* ==========================================================================
+   7. DASHBOARD PANELS
+   ========================================================================== */
+
+.dashboard-side-panel,
+.dashboard-syllabus-card,
+.timer-panel,
+.timer-workspace,
+.billing-plan-card {
+  border-radius: var(--radius-lg);
+
+  box-shadow: var(--shadow-card);
+
+  transition:
+    box-shadow var(--transition-smooth),
+    border-color var(--transition-fast),
+    transform var(--transition-smooth);
+}
+
+.dashboard-side-panel:hover,
+.dashboard-syllabus-card:hover {
+  box-shadow: var(--shadow-hover);
+}
+
+
+/* ==========================================================================
+   8. BILLING / PLAN CARDS
+   ========================================================================== */
+
+.billing-plan-card {
+  overflow: hidden;
+}
+
+.billing-plan-card:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-hover);
+}
+
+.billing-plan-card__badge {
+  box-shadow:
+    0 4px 14px -3px rgba(255, 94, 58, 0.35);
+}
+
+
+/* ==========================================================================
+   9. INTERACTIVE ROWS
+   ========================================================================== */
+
+.dashboard-task-row,
+.dashboard-syllabus__topic,
+.dashboard-syllabus__subject,
+.syllabus-topic,
+.dashboard-session-row,
+.material-row {
+  border-radius: var(--radius-sm);
+
+  transition:
+    background-color var(--transition-fast),
+    transform var(--transition-fast),
+    box-shadow var(--transition-fast);
+
+  cursor: pointer;
+}
+
+.dashboard-task-row:hover,
+.dashboard-syllabus__topic:hover,
+.dashboard-syllabus__subject:hover,
+.syllabus-topic:hover,
+.dashboard-session-row:hover,
+.material-row:hover {
+  background: var(--row-hover);
+  transform: translateX(2px);
+}
+
+
+/* ==========================================================================
+   10. SYLLABUS CONTROLS
+   ========================================================================== */
+
+.dashboard-syllabus__subject-button {
+  border-radius: var(--radius-sm);
+
+  transition:
+    transform var(--transition-fast),
+    box-shadow var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.dashboard-syllabus__subject-button:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-subtle);
+}
+
+.dashboard-syllabus__subject-button:active {
+  transform: scale(0.98);
+}
+
+.dashboard-syllabus__topic-dot,
+.dashboard-syllabus__subject-dot {
+  transition:
+    transform var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+.dashboard-syllabus__topic:hover
+.dashboard-syllabus__topic-dot,
+.dashboard-syllabus__subject-button:hover
+.dashboard-syllabus__subject-dot {
+  transform: scale(1.12);
+
+  box-shadow:
+    0 0 0 4px var(--accent-soft);
+}
+
+.dashboard-syllabus__topic:hover
+.syllabus-topic__chevron,
+.syllabus-topic:hover
+.syllabus-topic__chevron {
+  transform: translateX(2px);
+}
+
+
+/* ==========================================================================
+   11. STREAK
+   ========================================================================== */
+
+@keyframes flamePulse {
+  0%,
+  100% {
+    transform: scale(1);
+    filter:
+      drop-shadow(0 0 3px rgba(255, 93, 115, 0.25));
   }
 
-  .icon {
-    margin-bottom: 16px;
-    width: 22px;
-    height: 22px;
-  }
-
-  @media (max-width: 1024px) {
-    flex-direction: column;
-    text-align: center;
+  50% {
+    transform: scale(1.07);
+    filter:
+      drop-shadow(0 0 8px rgba(255, 93, 115, 0.5));
   }
 }
 
-#docs {
-  border-right: 1px solid var(--border);
+.dashboard-stat-grid svg[color="#FF5D73"],
+.dashboard-stat-grid svg[style*="#FF5D73"] {
+  animation:
+    flamePulse 2.8s ease-in-out infinite;
+}
 
-  @media (max-width: 1024px) {
-    border-right: none;
-    border-bottom: 1px solid var(--border);
+
+/* ==========================================================================
+   12. TIMER
+   ========================================================================== */
+
+.timer-dial {
+  filter:
+    drop-shadow(0 10px 24px rgba(0, 0, 0, 0.25));
+}
+
+.timer-dial__progress {
+  transition:
+    stroke-dashoffset 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.timer-dial__readout,
+.timer-dial__time {
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes dialGlow {
+  0%,
+  100% {
+    filter:
+      drop-shadow(0 0 5px rgba(255, 94, 58, 0.10));
+  }
+
+  50% {
+    filter:
+      drop-shadow(0 0 14px rgba(255, 94, 58, 0.28));
   }
 }
 
-#next-steps ul {
-  list-style: none;
-  padding: 0;
-  display: flex;
-  gap: 8px;
-  margin: 32px 0 0;
-
-  .logo {
-    height: 18px;
-  }
-
-  a {
-    color: var(--text-h);
-    font-size: 16px;
-    border-radius: 6px;
-    background: var(--social-bg);
-    display: flex;
-    padding: 6px 12px;
-    align-items: center;
-    gap: 8px;
-    text-decoration: none;
-    transition: box-shadow 0.3s;
-
-    &:hover {
-      box-shadow: var(--shadow);
-    }
-    .button-icon {
-      height: 18px;
-      width: 18px;
-    }
-  }
-
-  @media (max-width: 1024px) {
-    margin-top: 20px;
-    flex-wrap: wrap;
-    justify-content: center;
-
-    li {
-      flex: 1 1 calc(50% - 8px);
-    }
-
-    a {
-      width: 100%;
-      justify-content: center;
-      box-sizing: border-box;
-    }
-  }
+.timer-dial.is-running {
+  animation:
+    dialGlow 3.5s ease-in-out infinite;
 }
 
-#spacer {
-  height: 88px;
-  border-top: 1px solid var(--border);
-  @media (max-width: 1024px) {
-    height: 48px;
-  }
+
+/* ==========================================================================
+   13. TIMER CONTROLS
+   ========================================================================== */
+
+.timer-mode-switch button,
+.timer-presets button,
+.timer-config button {
+  border-radius: var(--radius-sm);
+
+  transition:
+    background-color var(--transition-fast),
+    transform var(--transition-fast),
+    box-shadow var(--transition-fast),
+    color var(--transition-fast);
 }
 
-.ticks {
+.timer-mode-switch button:hover,
+.timer-presets button:hover,
+.timer-config button:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-subtle);
+}
+
+
+/* ==========================================================================
+   14. BUTTONS
+   ========================================================================== */
+
+button {
+  transition:
+    transform var(--transition-fast),
+    box-shadow var(--transition-fast),
+    background-color var(--transition-fast),
+    opacity var(--transition-fast),
+    filter var(--transition-fast);
+}
+
+button:hover {
+  filter: brightness(1.035);
+}
+
+button:active {
+  transform: scale(0.98);
+}
+
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-xs);
+}
+
+
+/* ==========================================================================
+   15. INPUTS / SELECTS
+   ========================================================================== */
+
+select,
+input {
+  border-radius: var(--radius-sm);
+
+  transition:
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+select:focus,
+input:focus {
+  outline: none;
+
+  border-color: var(--accent);
+
+  box-shadow:
+    0 0 0 3px var(--accent-soft);
+}
+
+
+/* ==========================================================================
+   16. EMPTY STATES
+   ========================================================================== */
+
+.dashboard-empty-state {
+  border-style: dashed;
+  border-radius: var(--radius-lg);
+
+  box-shadow: var(--shadow-subtle);
+}
+
+
+/* ==========================================================================
+   17. DASHBOARD HEADER
+   ========================================================================== */
+
+.dashboard-greeting {
+  animation:
+    fadeSlideDown 420ms var(--ease-out-expo) backwards;
+}
+
+.dashboard-summary {
+  animation:
+    fadeSlideDown 420ms var(--ease-out-expo) 70ms backwards;
+}
+
+
+/* ==========================================================================
+   18. VIEW TRANSITIONS
+   ========================================================================== */
+
+.dashboard-view,
+.timer-page,
+.billing-page {
+  animation:
+    riseIn 340ms var(--ease-out-expo);
+}
+
+
+/* ==========================================================================
+   19. CLEAN SECTION DIVIDERS
+   ========================================================================== */
+
+.dashboard-section,
+.dashboard-panel-section {
   position: relative;
-  width: 100%;
+}
 
-  &::before,
-  &::after {
-    content: '';
-    position: absolute;
-    top: -4.5px;
-    border: 5px solid transparent;
+.dashboard-section + .dashboard-section,
+.dashboard-panel-section + .dashboard-panel-section {
+  border-top: 1px solid var(--glass-border);
+}
+
+
+/* ==========================================================================
+   20. RESPONSIVE POLISH
+   ========================================================================== */
+
+@media (max-width: 1024px) {
+  .dashboard-stat-grid > div:hover,
+  .billing-plan-card:hover {
+    transform: none;
   }
 
-  &::before {
-    left: 0;
-    border-left-color: var(--border);
+  .dashboard-task-row:hover,
+  .dashboard-syllabus__topic:hover,
+  .dashboard-syllabus__subject:hover,
+  .syllabus-topic:hover,
+  .dashboard-session-row:hover,
+  .material-row:hover {
+    transform: none;
   }
-  &::after {
-    right: 0;
-    border-right-color: var(--border);
+}
+
+@media (max-width: 640px) {
+  .dashboard-stat-grid > div {
+    border-radius: var(--radius-md);
+  }
+
+  .dashboard-side-panel,
+  .dashboard-syllabus-card,
+  .timer-panel,
+  .timer-workspace,
+  .billing-plan-card {
+    border-radius: var(--radius-md);
+  }
+}
+
+
+/* ==========================================================================
+   21. ACCESSIBILITY
+   ========================================================================== */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

@@ -2375,7 +2375,7 @@ function LoginView({ onLogin, t }) {
 
 const PLANS = [
   {
-    id: "free", name: "Free", portal: "student", prices: { month: 0 },
+    id: "free", name: "Free", portal: "student", prices: { month: 0, quarter: 0, year: 0 },
     tagline: "A strong foundation for your study routine.",
     features: [
       "Core StudentOS Dashboard", "Syllabus & Subject Tracking", "Study Timer & Streaks",
@@ -2760,6 +2760,12 @@ export default function StudentOS() {
     return () => { mounted = false; };
   }, []);
 
+  useEffect(() => {
+    if (typeof document !== "undefined") {
+      document.body.dataset.theme = profile.theme;
+    }
+  }, [profile.theme]);
+
   const toggleTheme = useCallback(() => {
     setProfile((prev) => {
       const next = { ...prev, theme: prev.theme === "dark" ? "light" : "dark" };
@@ -3086,12 +3092,14 @@ export default function StudentOS() {
 
   return (
     <div
+      data-theme={profile.theme}
       style={{
         background: t.bg,
         color: t.text,
         fontFamily: "Inter, system-ui, -apple-system, sans-serif",
-        minHeight: 560,
-        borderRadius: 16,
+        width: "100%",
+        minHeight: "100vh",
+        borderRadius: 0,
         overflow: "hidden",
         display: "flex",
         flexDirection: "column",
