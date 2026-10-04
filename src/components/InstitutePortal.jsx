@@ -777,7 +777,7 @@ function InstitutePortal({ t }) {
   }
   if (status === "setup") {
     return (
-      <div className="institute-portal" style={{ "--institute-border": t.border, "--institute-surface": t.surface, "--institute-raised": t.surfaceRaised, "--institute-text": t.text, "--institute-muted": t.textMuted }}>
+      <div className="institute-portal" style={{ "--institute-border": t.border, "--institute-surface": t.surface, "--institute-raised": t.surfaceRaised, "--institute-control": t.controlSurface, "--institute-text": t.text, "--institute-muted": t.textMuted }}>
         <header className="institute-page-heading">
           <div><p className="institute-eyebrow">Workspace setup</p><h1>Create your Institute</h1><p>Creating an Institute makes your account its Admin.</p></div>
           <ShieldCheck size={24} />
@@ -813,7 +813,7 @@ function InstitutePortal({ t }) {
   const classNameFor = (classId) => classes.find((entry) => entry.id === classId)?.name || "Institute-wide";
 
   return (
-    <div className="institute-portal" style={{ "--institute-border": t.border, "--institute-surface": t.surface, "--institute-raised": t.surfaceRaised, "--institute-text": t.text, "--institute-muted": t.textMuted }}>
+    <div className="institute-portal" style={{ "--institute-border": t.border, "--institute-surface": t.surface, "--institute-raised": t.surfaceRaised, "--institute-control": t.controlSurface, "--institute-text": t.text, "--institute-muted": t.textMuted }}>
       <header className="institute-page-heading">
         <div>
           <p className="institute-eyebrow">Institute workspace · {ROLE_LABELS[currentRole]}</p>

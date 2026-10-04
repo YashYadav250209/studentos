@@ -10,7 +10,7 @@ const RARITIES = RARITY_ORDER;
 function textInputStyle(t) {
   return {
     width: "100%", minWidth: 0, padding: "9px 10px", borderRadius: 8,
-    border: `1px solid ${t.border}`, background: t.surface, color: t.text,
+    border: `1px solid ${t.border}`, background: t.controlSurface, color: t.text,
     fontSize: 12.5, outline: "none",
   };
 }
@@ -179,7 +179,7 @@ function MemberManager({ titleSystem, titles, onSaveMember, onToggleGrant, theme
     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 260px), 1fr))", gap: 14, alignItems: "start" }}>
       <div style={{ minWidth: 0 }}>
         <SectionHeading title="Member access" detail="Set student, teacher, or admin. Owner remains fixed to the configured account." t={t} />
-        <form onSubmit={handleSubmit} style={{ display: "grid", gap: 8, padding: 13, border: `1px solid ${t.border}`, background: t.surface, borderRadius: 10 }}>
+        <form className="titles-management-form" onSubmit={handleSubmit} style={{ display: "grid", gap: 8, padding: 13, border: `1px solid ${t.border}`, background: t.surface, borderRadius: 10 }}>
           <input aria-label="Member email" type="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="member@example.com" style={textInputStyle(t)} />
           <input aria-label="Display name" value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="Display name" style={textInputStyle(t)} />
           <div style={{ display: "flex", gap: 8 }}>
@@ -284,7 +284,7 @@ function CatalogManager({ titles, onUpdateTitle, onCreateTitle, onRemoveTitle, t
     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 260px), 1fr))", gap: 14, alignItems: "start" }}>
       <div>
         <SectionHeading title="Edit title catalog" detail="Changes are saved for this browser profile." t={t} />
-        <form onSubmit={handleEdit} style={{ display: "grid", gap: 8, padding: 13, borderRadius: 10, border: `1px solid ${t.border}`, background: t.surface }}>
+        <form className="titles-management-form" onSubmit={handleEdit} style={{ display: "grid", gap: 8, padding: 13, borderRadius: 10, border: `1px solid ${t.border}`, background: t.surface }}>
           <select aria-label="Title to edit" value={editingId} onChange={(event) => { setEditingId(event.target.value); setEditOverrides({}); }} style={textInputStyle(t)}>
             {titles.map((title) => <option key={title.id} value={title.id}>{title.name}</option>)}
           </select>
@@ -310,7 +310,7 @@ function CatalogManager({ titles, onUpdateTitle, onCreateTitle, onRemoveTitle, t
 
       <div>
         <SectionHeading title="Create custom title" detail="Add future categories and achievements without changing the catalog code." t={t} />
-        <form onSubmit={handleCreate} style={{ display: "grid", gap: 8, padding: 13, borderRadius: 10, border: `1px solid ${t.border}`, background: t.surface }}>
+        <form className="titles-management-form" onSubmit={handleCreate} style={{ display: "grid", gap: 8, padding: 13, borderRadius: 10, border: `1px solid ${t.border}`, background: t.surface }}>
           <input aria-label="New title name" required value={createValues.name} onChange={(event) => setCreateValues((current) => ({ ...current, name: event.target.value }))} placeholder="Title name" style={textInputStyle(t)} />
           <input aria-label="New title description" value={createValues.description} onChange={(event) => setCreateValues((current) => ({ ...current, description: event.target.value }))} placeholder="Description" style={textInputStyle(t)} />
           <div style={{ display: "flex", gap: 8 }}>
@@ -359,7 +359,7 @@ export function TitlesView({
         </div>
       </div>
 
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", padding: 12, border: `1px solid ${t.border}`, borderRadius: 10, background: t.surface }}>
+      <div className="titles-profile-card" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", padding: 12, border: `1px solid ${t.border}`, borderRadius: 10, background: t.surface }}>
         <ProfileIdentity profile={profile} role={role} title={title} t={t} theme={theme} onUpdateName={onUpdateProfileName} />
         <div style={{ minWidth: 145 }}>
           <div style={{ display: "flex", justifyContent: "space-between", gap: 8, color: t.textMuted, fontSize: 10.5, marginBottom: 5 }}><span>{nextXpTitle ? `Next: ${nextXpTitle.name}` : "XP titles complete"}</span><span>{nextXpTitle ? `${nextXpTitle.xpRequired.toLocaleString()} XP` : ""}</span></div>

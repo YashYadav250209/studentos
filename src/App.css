@@ -43,7 +43,8 @@
 
   --shadow-card:
     0 8px 24px -8px rgba(0, 0, 0, 0.45),
-    0 1px 3px rgba(0, 0, 0, 0.25);
+    0 1px 3px rgba(0, 0, 0, 0.25),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
 
   --shadow-hover:
     0 14px 32px -10px rgba(0, 0, 0, 0.55),
@@ -69,27 +70,28 @@
 
 [data-theme="light"] {
   --shadow-subtle:
-    0 2px 8px rgba(15, 23, 42, 0.035);
+    0 2px 8px rgba(20, 70, 150, 0.10);
 
   --shadow-card:
-    0 8px 24px -8px rgba(15, 23, 42, 0.07),
-    0 1px 3px rgba(15, 23, 42, 0.035);
+    0 10px 30px -10px rgba(20, 70, 150, 0.28),
+    0 1px 3px rgba(20, 70, 150, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.65);
 
   --shadow-hover:
-    0 14px 32px -10px rgba(15, 23, 42, 0.10),
-    0 0 0 1px rgba(15, 23, 42, 0.06);
+    0 16px 36px -10px rgba(20, 70, 150, 0.38),
+    0 0 0 1px rgba(255, 255, 255, 0.7);
 
   --glass-surface:
-    rgba(255, 255, 255, 0.88);
+    rgba(255, 255, 255, 0.64);
 
   --glass-border:
-    rgba(15, 23, 42, 0.07);
+    rgba(30, 90, 170, 0.18);
 
   --row-hover:
-    rgba(15, 23, 42, 0.03);
+    rgba(255, 255, 255, 0.45);
 
   --press:
-    rgba(15, 23, 42, 0.05);
+    rgba(255, 255, 255, 0.35);
 }
 
 
@@ -594,4 +596,116 @@ input:focus {
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+}
+
+/* ==========================================================================
+   22. GLASS SURFACES (space background shows through)
+   Panels get their translucent color from the theme tokens in App.jsx
+   (t.surface / t.surfaceRaised); this adds the frosted blur to class-based
+   panels. Blur stays modest because the background is animated, and nested
+   panels (e.g. .timer-workspace) skip it so glass never stacks on glass.
+   ========================================================================== */
+
+.timer-panel,
+.billing-plan-card {
+  -webkit-backdrop-filter: blur(10px) saturate(1.1);
+  backdrop-filter: blur(10px) saturate(1.1);
+}
+
+/* Fallback: no backdrop-filter support -> slightly more opaque for legibility */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .timer-panel,
+  .billing-plan-card {
+    background-color: var(--timer-surface, rgba(19, 18, 31, 0.9));
+  }
+}
+
+
+/* ==========================================================================
+   23. LIGHT-THEME PARITY
+   Keeps the same effects as dark: sheen on stat cards, soft dial shadow,
+   visible scrollbars.
+   ========================================================================== */
+
+[data-theme="light"] .dashboard-stat-grid > div::before {
+  background:
+    radial-gradient(circle at top left, rgba(255, 255, 255, 0.32), transparent 65%);
+}
+
+/* The sheen overlay is absolutely positioned, so it painted ON TOP of the card
+   text and washed it out (very visible in light mode). Lift the content above it. */
+.dashboard-stat-grid > div::before {
+  z-index: 0;
+}
+
+.dashboard-stat-grid > div > * {
+  position: relative;
+  z-index: 1;
+}
+
+[data-theme="light"] .timer-dial {
+  filter: drop-shadow(0 10px 24px rgba(20, 70, 150, 0.25));
+}
+
+[data-theme="light"] *::-webkit-scrollbar-thumb {
+  background: rgba(30, 90, 170, 0.32);
+}
+
+[data-theme="light"] *::-webkit-scrollbar-thumb:hover {
+  background: rgba(30, 90, 170, 0.5);
+}
+
+
+/* ==========================================================================
+   24. CARD FX (Magic Bento): border glow, hover particles, ripple
+   Driven by CardFX in App.jsx, which sets --glow-x/--glow-y/--glow-intensity
+   on each glass box and adds the .fx-card class. Works in both themes
+   (--glow-color is violet in dark, blue in light).
+   ========================================================================== */
+
+:where(.fx-card) {
+  position: relative;
+}
+
+.fx-card::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1.5px;
+  pointer-events: none;
+  z-index: 3;
+  background:
+    radial-gradient(
+      var(--glow-radius, 300px) circle at var(--glow-x, 50%) var(--glow-y, 50%),
+      rgba(var(--glow-color, 132, 0, 255), calc(var(--glow-intensity, 0) * 0.95)) 0%,
+      rgba(var(--glow-color, 132, 0, 255), calc(var(--glow-intensity, 0) * 0.45)) 30%,
+      transparent 60%
+    );
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+}
+
+.fx-layer {
+  position: absolute !important;
+  inset: 0 !important;
+  border-radius: inherit;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 2 !important;
+}
+
+.fx-particle {
+  position: absolute;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: rgb(var(--glow-color, 132, 0, 255));
+  box-shadow: 0 0 6px rgba(var(--glow-color, 132, 0, 255), 0.7);
 }

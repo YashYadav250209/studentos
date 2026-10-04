@@ -636,26 +636,33 @@ function formatClock(totalSeconds) {
 const THEMES = {
   dark: {
     bg: "#0D0B14",
-    surface: "#13121F",
-    surfaceRaised: "#191827",
-    border: "#302B3C",
+    surface: "rgba(14, 13, 24, 0.86)",
+    surfaceRaised: "rgba(22, 21, 36, 0.90)",
+    chrome: "rgba(18, 16, 34, 0.38)",
+    border: "rgba(120, 110, 170, 0.26)",
     text: "#F7F5FC",
     textMuted: "#9B98AA",
-    textFaint: "#787386",
+    textFaint: "#9490A6",
   },
   light: {
     bg: "#F5F7FA",
-    surface: "#FFFFFF",
-    surfaceRaised: "#F1F5F9",
-    border: "#D9E1EC",
+    surface: "rgba(255, 255, 255, 0.64)",
+    surfaceRaised: "rgba(244, 249, 255, 0.74)",
+    chrome: "rgba(255, 255, 255, 0.38)",
+    border: "rgba(30, 90, 170, 0.24)",
     text: "#111827",
-    textMuted: "#4E5D73",
-    textFaint: "#7C8BA3",
+    textMuted: "#34445E",
+    textFaint: "#4A5972",
   },
 };
 
 const ACCENT = "#FF5E3A";
 const STREAK_ACCENT = "#FF5D73";
+
+// Frosted-glass effect for cards/panels. Keep blur modest: the background animates.
+// Sidebar + top bar: lighter tint and stronger blur so the background reads through.
+const GLASS_CHROME = { backdropFilter: "blur(18px) saturate(1.25)", WebkitBackdropFilter: "blur(18px) saturate(1.25)" };
+const GLASS = { backdropFilter: "blur(12px) saturate(1.1)", WebkitBackdropFilter: "blur(12px) saturate(1.1)" };
 
 /* ============================================================================
    UI PRIMITIVES
@@ -808,7 +815,7 @@ function DashboardSyllabusCard({ topicStatus, onCycleTopic, subjectProgress, ove
   const [expandedSubject, setExpandedSubject] = useState(null);
 
   return (
-    <section className="dashboard-syllabus-card" style={{ background: t.surface, border: `1px solid ${t.border}`, borderRadius: 14, padding: 20 }}>
+    <section className="dashboard-syllabus-card" style={{ background: t.surface, ...GLASS, border: `1px solid ${t.border}`, borderRadius: 14, padding: 20 }}>
       <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 12 }}>
         <div style={{ fontSize: 13.5, fontWeight: 600 }}>Syllabus</div>
         <div style={{ textAlign: "right" }}>
@@ -1477,7 +1484,7 @@ function AddTaskForm({ onAdd, t }) {
       onSubmit={handleSubmit}
       style={{
         display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center",
-        background: t.surface, border: `1px solid ${t.border}`, borderRadius: 12, padding: 14, marginBottom: 16,
+        background: t.surface, ...GLASS, border: `1px solid ${t.border}`, borderRadius: 12, padding: 14, marginBottom: 16,
       }}
     >
       <select
@@ -1572,7 +1579,7 @@ function PlanView({ tasks, onAddTask, onToggleTask, onDeleteTask, dailyGoalMinut
         </div>
       </div>
 
-      <div style={{ background: t.surface, border: `1px solid ${t.border}`, borderRadius: 12, padding: 14, marginBottom: 16 }}>
+      <div style={{ background: t.surface, ...GLASS, border: `1px solid ${t.border}`, borderRadius: 12, padding: 14, marginBottom: 16 }}>
         <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8, fontSize: 12.5 }}>
           <span style={{ color: t.textMuted }}>Today's study time vs. goal</span>
           <span style={{ fontFamily: "'IBM Plex Mono', monospace", color: t.text }}>
@@ -1647,18 +1654,18 @@ function ProgressView({ subjectProgress, overallProgress, topicStatus, sessions,
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "minmax(260px, 1fr) minmax(260px, 1fr)", gap: 14, marginBottom: 14 }}>
-        <div style={{ background: t.surface, border: `1px solid ${t.border}`, borderRadius: 14, padding: 20 }}>
+        <div style={{ background: t.surface, ...GLASS, border: `1px solid ${t.border}`, borderRadius: 14, padding: 20 }}>
           <div style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 16 }}>Subject completion</div>
           <SubjectRings progress={subjectProgress} t={t} />
         </div>
 
-        <div style={{ background: t.surface, border: `1px solid ${t.border}`, borderRadius: 14, padding: 20 }}>
+        <div style={{ background: t.surface, ...GLASS, border: `1px solid ${t.border}`, borderRadius: 14, padding: 20 }}>
           <div style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 4 }}>Study hours — last 7 days</div>
           <BarChartMini data={dailyData} color={ACCENT} t={t} />
         </div>
       </div>
 
-      <div style={{ background: t.surface, border: `1px solid ${t.border}`, borderRadius: 14, padding: 20 }}>
+      <div style={{ background: t.surface, ...GLASS, border: `1px solid ${t.border}`, borderRadius: 14, padding: 20 }}>
         <div style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 4 }}>Study hours — last 6 weeks</div>
         <BarChartMini data={weeklyData} color="#5B8DEF" t={t} height={130} />
       </div>
@@ -1791,7 +1798,7 @@ function InstitutionOverview({ readNoticeIds, t }) {
         />
       </div>
 
-      <div style={{ background: t.surface, border: `1px solid ${t.border}`, borderRadius: 14, padding: 18, marginBottom: 14 }}>
+      <div style={{ background: t.surface, ...GLASS, border: `1px solid ${t.border}`, borderRadius: 14, padding: 18, marginBottom: 14 }}>
         <div style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 12 }}>What needs your attention</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {overallAttendancePct < ATTENDANCE_TARGET_PCT && (
@@ -1897,7 +1904,7 @@ function InstitutionAttendance({ t }) {
 
   return (
     <div>
-      <div style={{ background: t.surface, border: `1px solid ${t.border}`, borderRadius: 14, padding: 20, marginBottom: 14 }}>
+      <div style={{ background: t.surface, ...GLASS, border: `1px solid ${t.border}`, borderRadius: 14, padding: 20, marginBottom: 14 }}>
         <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 10 }}>
           <span style={{ fontSize: 13.5, fontWeight: 600 }}>Overall attendance</span>
           <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 22, fontWeight: 700, color: overall < ATTENDANCE_TARGET_PCT ? STREAK_ACCENT : "#00E699" }}>
@@ -1916,7 +1923,7 @@ function InstitutionAttendance({ t }) {
         {rows.map((r) => {
           const subject = SUBJECTS[r.subjectId];
           return (
-            <div key={r.subjectId} style={{ background: t.surface, border: `1px solid ${t.border}`, borderRadius: 12, padding: 14 }}>
+            <div key={r.subjectId} style={{ background: t.surface, ...GLASS, border: `1px solid ${t.border}`, borderRadius: 12, padding: 14 }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   <span style={{ width: 8, height: 8, borderRadius: "50%", background: subject.color }} />
@@ -1945,7 +1952,7 @@ function NoticeCard({ notice, isRead, onMarkRead, t }) {
     <div
       className="dashboard-task-row"
       style={{
-        background: t.surface, border: `1px solid ${t.border}`, borderRadius: 12, padding: 15,
+        background: t.surface, ...GLASS, border: `1px solid ${t.border}`, borderRadius: 12, padding: 15,
         marginBottom: 8, opacity: isRead ? 0.65 : 1,
       }}
     >
@@ -1997,7 +2004,7 @@ function InstitutionNotices({ readNoticeIds, onMarkRead, t }) {
 function ExamCard({ exam, t }) {
   const subject = SUBJECTS[exam.subjectId];
   return (
-    <div style={{ background: t.surface, border: `1px solid ${t.border}`, borderRadius: 12, padding: 16, marginBottom: 10 }}>
+    <div style={{ background: t.surface, ...GLASS, border: `1px solid ${t.border}`, borderRadius: 12, padding: 16, marginBottom: 10 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span style={{ width: 8, height: 8, borderRadius: "50%", background: subject.color }} />
@@ -2062,7 +2069,7 @@ function InstitutionExams({ t }) {
 
 function EventCard({ event, t }) {
   return (
-    <div style={{ background: t.surface, border: `1px solid ${t.border}`, borderRadius: 12, padding: 16, marginBottom: 10 }}>
+    <div style={{ background: t.surface, ...GLASS, border: `1px solid ${t.border}`, borderRadius: 12, padding: 16, marginBottom: 10 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
         <PartyPopper size={15} color={ACCENT} />
         <span style={{ fontSize: 14, fontWeight: 600 }}>{event.title}</span>
@@ -2241,7 +2248,8 @@ function LoginView({ onLogin, t }) {
   return (
     <div
       style={{
-        minHeight: 560, borderRadius: 16, background: t.bg, color: t.text,
+        minHeight: "100vh", position: "relative", zIndex: 1, borderRadius: 0,
+        background: "transparent", color: t.text,
         fontFamily: "Inter, system-ui, -apple-system, sans-serif",
         display: "flex", alignItems: "center", justifyContent: "center", padding: 24,
       }}
@@ -2265,7 +2273,7 @@ function LoginView({ onLogin, t }) {
 
         <div
           style={{
-            background: t.surface, border: `1px solid ${t.border}`, borderRadius: 16,
+            background: t.surface, ...GLASS, border: `1px solid ${t.border}`, borderRadius: 16,
             padding: 26,
           }}
         >
@@ -2732,6 +2740,567 @@ function SubscriptionView({ currentPlan, currentDuration = "month", onSelectPlan
    APP
    ============================================================================ */
 
+/* ============================================================================
+   SPACE BACKGROUND (merged in so the whole app is one file)
+   ============================================================================ */
+
+/**
+ * SpaceBackground — interactive 3D galaxy (canvas 2D, no dependencies).
+ * Fixed behind the whole app. Stars, dust and the galaxy react to the cursor
+ * (gravity, swirl, momentum, parallax). Listens on `window`, so it keeps
+ * working while the pointer is over your UI.
+ *
+ * Usage: render once, near the top of your app, and make the app's own
+ * root/background transparent so this shows through.
+ *   <SpaceBackground />
+ */
+function SpaceBackground({ style }) {
+  const canvasRef = useRef(null);
+
+  useEffect(() => {
+    const cv=canvasRef.current,ctx=cv.getContext('2d');
+    const off=[],on=(el,ev,fn,o)=>{el.addEventListener(ev,fn,o);off.push(()=>el.removeEventListener(ev,fn,o))};
+    let raf=0;
+    const reduce=matchMedia('(prefers-reduced-motion: reduce)').matches, amb=reduce?.25:1;
+    const TAU=Math.PI*2, rnd=Math.random, randn=()=>(rnd()+rnd()+rnd()+rnd()-2)*1.2;
+    let W,H,DPR,bg;
+
+    /* ---------- sprites ---------- */
+    function sprite(n,stops){const c=document.createElement('canvas');c.width=c.height=n;const g=c.getContext('2d');
+      const r=g.createRadialGradient(n/2,n/2,0,n/2,n/2,n/2);stops.forEach(s=>r.addColorStop(s[0],s[1]));
+      g.fillStyle=r;g.fillRect(0,0,n,n);return c}
+    const glow=sprite(64,[[0,'rgba(255,255,255,1)'],[.16,'rgba(205,218,255,.42)'],[1,'rgba(120,140,255,0)']]);
+    const core=sprite(256,[[0,'rgba(232,168,214,.5)'],[.12,'rgba(196,110,200,.22)'],[.4,'rgba(130,70,190,.08)'],[1,'rgba(90,60,220,0)']]);
+    const haze=sprite(64,[[0,'rgba(230,160,255,.55)'],[1,'rgba(150,90,255,0)']]);
+    const spike=(()=>{const n=128,c=document.createElement('canvas');c.width=c.height=n;const g=c.getContext('2d');
+      const h=g.createRadialGradient(64,64,0,64,64,64);
+      h.addColorStop(0,'rgba(255,255,255,1)');h.addColorStop(.06,'rgba(235,228,255,.8)');h.addColorStop(.2,'rgba(150,140,255,.22)');h.addColorStop(1,'rgba(100,90,255,0)');
+      g.fillStyle=h;g.fillRect(0,0,n,n);
+      for(let v=0;v<2;v++){const l=v?g.createLinearGradient(64,0,64,n):g.createLinearGradient(0,64,n,64);
+        l.addColorStop(0,'rgba(255,255,255,0)');l.addColorStop(.5,'rgba(255,255,255,.9)');l.addColorStop(1,'rgba(255,255,255,0)');
+        g.fillStyle=l;if(v)g.fillRect(63.4,0,1.2,n);else g.fillRect(0,63.4,n,1.2)}
+      return c})();
+
+    const nz=new Float32Array(65536);for(let i=0;i<65536;i++)nz[i]=rnd();
+    function vn(x,y){const xi=Math.floor(x),yi=Math.floor(y),fx=x-xi,fy=y-yi,u=fx*fx*(3-2*fx),v=fy*fy*(3-2*fy);
+      const x0=xi&255,y0=yi&255,x1=(x0+1)&255,y1=(y0+1)&255;
+      const a=nz[y0*256+x0],b=nz[y0*256+x1],c=nz[y1*256+x0],d=nz[y1*256+x1];
+      return a+(b-a)*u+(c-a)*v+(a-b-c+d)*u*v}
+    function fbm(x,y,o){let s=0,a=.5,f=1;for(let i=0;i<o;i++){s+=a*vn(x*f,y*f);f*=2.03;a*=.5}return s}
+    const PAL=[[0,20,14,80],[.18,48,30,130],[.4,86,42,150],[.62,112,46,144],[.82,148,84,160],[1,176,128,182]];
+    function makeNebula(w,h,seed,wisp,bright){
+      const c=document.createElement('canvas');c.width=w;c.height=h;const g=c.getContext('2d');
+      const im=g.createImageData(w,h),d=im.data,asp=w/h;
+      for(let y=0;y<h;y++)for(let x=0;x<w;x++){
+        const u=x/w,v=y/h,X=u*asp*2.2+seed,Y=v*2.2+seed*.7;
+        const wx=fbm(X+3.1,Y,4),wy=fbm(X,Y+7.7,4);
+        const n=fbm(X*1.6+wx*2.2,Y*1.6+wy*2.2,6);
+        const rg=1-Math.abs(2*fbm(X*2.4+wy*1.8,Y*2.4+wx*1.8,4)-1);
+        const by=.56-.2*(u-.5)+.06*Math.sin(u*7+seed),dy=(v-by)/.2,band=Math.exp(-dy*dy);
+        const bx=(u-.6)/.2,bz=(v-.44)/.16,blob=Math.exp(-(bx*bx+bz*bz));
+        const m=Math.max(band*.8,blob*.85)+.18;
+        let val=Math.pow(n,1.5)*1.3*m+Math.pow(rg,3)*wisp*band*.5+blob*.08*bright;
+        let e=Math.min(u,1-u,v,1-v)*5;e=e>1?1:e;e=e*e*(3-2*e);val*=e;
+        let k=0;while(k<4&&val>PAL[k+1][0])k++;
+        const A=PAL[k],B=PAL[Math.min(5,k+1)],q=Math.min(1,Math.max(0,(val-A[0])/((B[0]-A[0])||1)));
+        const i=(y*w+x)*4;
+        d[i]=A[1]+(B[1]-A[1])*q;d[i+1]=A[2]+(B[2]-A[2])*q;d[i+2]=A[3]+(B[3]-A[3])*q;d[i+3]=Math.min(1,val*1.1)*255;
+      }
+      g.putImageData(im,0,0);return c;
+    }
+    const neb1=makeNebula(768,432,1.3,1,1),neb2=makeNebula(512,288,7.9,1.6,0);
+
+    /* ---------- galaxy ---------- */
+    const GN=9500,NB=8;
+    const gr=new Float32Array(GN),gth=new Float32Array(GN),gz=new Float32Array(GN),gsz=new Float32Array(GN);
+    const GC=['226,184,216','228,182,224','226,186,240','226,190,255','204,180,255','184,172,255','164,162,255','150,150,255'];
+    const GA=[.12,.14,.18,.22,.27,.32,.36,.34];
+    const gStart=new Int32Array(NB+1);
+    (()=>{
+      const tmp=[];
+      for(let i=0;i<GN;i++){
+        let r,th,z;
+        if(rnd()<.14){r=Math.pow(rnd(),2)*.3;th=rnd()*TAU;z=randn()*.1*(1-r)}
+        else{r=.05+Math.pow(rnd(),1.35)*.95;th=(rnd()*3|0)*TAU/3+r*5.4+randn()*(.1+.28*r);z=randn()*.03*(1-r*.6)}
+        const b=Math.min(NB-1,Math.max(0,Math.floor(r*NB*1.05+randn()*.9)));
+        tmp.push({r,th,z,b,s:.6+Math.pow(rnd(),4)*1.6});
+      }
+      tmp.sort((a,c)=>a.b-c.b);
+      tmp.forEach((p,i)=>{gr[i]=p.r;gth[i]=p.th;gz[i]=p.z;gsz[i]=p.s;gStart[p.b+1]++});
+      for(let b=0;b<NB;b++)gStart[b+1]+=gStart[b];
+    })();
+
+    /* ---------- stars ---------- */
+    const SN=3800,MN=110,TN=SN+MN;
+    const su=new Float32Array(TN),sv=new Float32Array(TN),sz=new Float32Array(TN),sph=new Float32Array(TN),ssz=new Float32Array(TN);
+    const sox=new Float32Array(TN),soy=new Float32Array(TN),svx=new Float32Array(TN),svy=new Float32Array(TN);
+    const scol=new Uint8Array(TN),big=new Uint8Array(TN);
+    const SC=['rgb(240,244,255)','rgb(170,200,255)','rgb(255,205,225)'];
+    let midIdx=0;
+    (()=>{
+      const zs=[];
+      for(let i=0;i<SN;i++)zs.push(Math.pow(rnd(),1.8)*.92+.08);
+      zs.sort((a,b)=>a-b);
+      for(let i=0;i<MN;i++)zs.push(1+rnd()*.5);
+      zs.forEach((z,i)=>{
+        sz[i]=z;su[i]=rnd();sv[i]=rnd();sph[i]=rnd()*TAU;
+        const c=rnd();scol[i]=c<.6?0:c<.85?1:2;
+        big[i]=(z>.5&&z<=1&&rnd()<.02)?1:0;
+        ssz[i]=z>1?8+rnd()*14:.5+z*1.2;
+        if(z<.4)midIdx=i+1;
+      });
+    })();
+
+    /* ---------- state ---------- */
+    const cam={x:0,y:0,vx:0,vy:0};
+    let ptX=0,ptY=0,nx=0,ny=0,mx=-9999,my=-9999,cvx=0,cvy=0,act=false,press=0,pr=0,moved=false;
+    let cy,sy,cp,sp,cr,sr,gcx,gcy,GS,LR=300,LR2=9e4,PX,PY,PS,ddt=.016,t=0;
+    let shoot=null,nextShoot=3.5;
+
+    on(window,'pointermove',e=>{
+      ptX=e.clientX;ptY=e.clientY;nx=ptX/W*2-1;ny=ptY/H*2-1;
+      if(!act){mx=ptX;my=ptY}
+      act=true;
+      moved=true;
+    },{passive:true});
+    on(window,'pointerdown',()=>{press=1});
+    on(window,'pointerup',()=>{press=0});
+    on(document.documentElement,'pointerleave',()=>{act=false;nx=ny=0;press=0});
+
+    function size(){
+      DPR=Math.min(devicePixelRatio||1,1.75);W=innerWidth;H=innerHeight;
+      cv.width=W*DPR|0;cv.height=H*DPR|0;ctx.setTransform(DPR,0,0,DPR,0,0);
+      bg=ctx.createRadialGradient(W*.6,H*.44,0,W*.6,H*.44,Math.max(W,H)*.8);
+      bg.addColorStop(0,'#100b34');bg.addColorStop(.5,'#070620');bg.addColorStop(1,'#020210');
+    }
+    on(window,'resize',size);size();
+
+    /* galaxy projection: spin -> 3D rotate (camera) -> roll -> perspective -> cursor lens */
+    function proj(r,th,z){
+      const a=th+t*.055*amb/(r+.35),c=Math.cos(a)*r,s=Math.sin(a)*r;
+      const x1=c*cy+z*sy,z1=-c*sy+z*cy,y1=s*cp-z1*sp,z2=s*sp+z1*cp;
+      const rx=x1*cr-y1*sr,ry=x1*sr+y1*cr,sc=1/(1+z2*.5);
+      let x=gcx+rx*GS*sc,y=gcy+ry*GS*sc;
+      if(act){
+        const dx=x-mx,dy=y-my,d2=dx*dx+dy*dy;
+        if(d2<LR2){
+          const f=1-Math.sqrt(d2)/LR,f2=f*f,p=.22*f2*(1+pr),w=.06*f2;
+          x+=-dx*p-dy*w+cvx*f2*.035;
+          y+=-dy*p+dx*w+cvy*f2*.035;
+        }
+      }
+      PX=x;PY=y;PS=sc;
+    }
+
+    /* stars: spring physics around cursor gravity + swirl + momentum kick */
+    function drawStars(a,b){
+      const Wp=W+80,Hp=H+80,damp=Math.exp(-ddt*3.2),K=8;
+      const G=700*(1+pr*1.8),R=230*(1+pr*.35);
+      for(let i=a;i<b;i++){
+        const z=sz[i];
+        su[i]+=ddt*(.0006+.003*z)*amb;sv[i]+=ddt*(.0002+.0007*z)*amb;
+        if(su[i]>1)su[i]-=1;if(sv[i]>1)sv[i]-=1;
+        const sh=10+150*z*z;
+        const bx=((su[i]*Wp-cam.x*sh)%Wp+Wp)%Wp-40,by=((sv[i]*Hp-cam.y*sh*.7)%Hp+Hp)%Hp-40;
+        const ox=sox[i],oy=soy[i];
+        let ax=-ox*K,ay=-oy*K;
+        if(act){
+          const dx=bx+ox-mx,dy=by+oy-my,d2=dx*dx+dy*dy,Rz=R*(.5+.6*Math.min(z,1.2));
+          if(d2<Rz*Rz){
+            const d=Math.sqrt(d2)+.001,f=1-d/Rz,f2=f*f,soft=Math.min(1,d/70);
+            ax+=-dx/d*G*f2*z*soft-dy/d*260*f2*z+cvx*f2*z*.55;
+            ay+=-dy/d*G*f2*z*soft+dx/d*260*f2*z+cvy*f2*z*.55;
+          }
+        }
+        svx[i]=(svx[i]+ax*ddt)*damp;svy[i]=(svy[i]+ay*ddt)*damp;
+        sox[i]=ox+svx[i]*ddt;soy[i]=soy[i]+svy[i]*ddt;
+        const x=bx+sox[i],y=by+soy[i],tw=.65+.35*Math.sin(t*(.5+z*1.5)+sph[i]);
+        if(z>1){
+          const s=ssz[i];ctx.globalAlpha=.16*tw;ctx.drawImage(glow,x-s/2,y-s/2,s,s);
+        }else if(big[i]){
+          const s=22+z*36;ctx.globalAlpha=.7*tw;ctx.drawImage(spike,x-s/2,y-s/2,s,s);
+        }else{
+          ctx.globalAlpha=(.3+.7*z)*tw;ctx.fillStyle=SC[scol[i]];ctx.fillRect(x,y,ssz[i],ssz[i]);
+        }
+      }
+      ctx.globalAlpha=1;
+    }
+
+    function drawNebula(img,par,sc,alpha,ph){
+      const w=W*sc,h=H*sc;
+      ctx.save();ctx.translate(W*.5-cam.x*par+Math.sin(t*.05*amb+ph)*14,H*.5-cam.y*par*.7+Math.cos(t*.04*amb+ph)*9);
+      ctx.rotate(Math.sin(t*.03*amb+ph)*.02);ctx.globalAlpha=alpha*(.88+.12*Math.sin(t*.15+ph));
+      ctx.drawImage(img,-w/2,-h/2,w,h);ctx.restore();
+    }
+
+    function frame(now){
+      ddt=Math.min(.05,(now-frame.last||16)/1000);frame.last=now;t+=ddt;
+
+      // camera spring (slight overshoot = momentum), cursor smoothing + velocity
+      const tx=nx*.9+Math.sin(t*.11)*.08*amb,ty=ny*.9+Math.cos(t*.09)*.06*amb;
+      cam.vx+=((tx-cam.x)*38-cam.vx*7)*ddt;cam.x+=cam.vx*ddt;
+      cam.vy+=((ty-cam.y)*38-cam.vy*7)*ddt;cam.y+=cam.vy*ddt;
+      if(act){
+        const k=1-Math.exp(-ddt*14),px0=mx,py0=my;
+        mx+=(ptX-mx)*k;my+=(ptY-my)*k;
+        const a=1-Math.exp(-ddt*8);
+        cvx+=((mx-px0)/ddt-cvx)*a;cvy+=((my-py0)/ddt-cvy)*a;
+      }else{const a=1-Math.exp(-ddt*4);cvx-=cvx*a;cvy-=cvy*a}
+      cvx=Math.max(-2500,Math.min(2500,cvx));cvy=Math.max(-2500,Math.min(2500,cvy));
+      pr+=((press?1:0)-pr)*(1-Math.exp(-ddt*6));
+      LR=300*(1+pr*.3);LR2=LR*LR;
+
+      const yaw=cam.x*.26,pit=1.1+cam.y*.16,roll=-.42;
+      cy=Math.cos(yaw);sy=Math.sin(yaw);cp=Math.cos(pit);sp=Math.sin(pit);cr=Math.cos(roll);sr=Math.sin(roll);
+      gcx=W*.6-cam.x*34;gcy=H*.44-cam.y*22;GS=Math.max(W,H)*.38;
+
+      ctx.globalCompositeOperation='source-over';ctx.globalAlpha=1;
+      ctx.fillStyle=bg;ctx.fillRect(0,0,W,H);
+
+      ctx.globalCompositeOperation='lighter';
+      drawStars(0,midIdx);                               // distant stars
+      drawNebula(neb1,20,1.35,.8,0);                      // nebula, back layer
+      drawNebula(neb2,44,1.4,.45,2);                      // nebula, mid layer
+
+      proj(0,0,0);const cs=GS*1.05;                      // galaxy core
+      ctx.globalAlpha=.3;ctx.drawImage(core,PX-cs/2,PY-cs/2,cs,cs);ctx.globalAlpha=1;
+      for(let b=0;b<NB;b++){                             // galaxy stars, batched by colour
+        ctx.fillStyle=`rgba(${GC[b]},${GA[b]})`;
+        for(let i=gStart[b];i<gStart[b+1];i++){
+          proj(gr[i],gth[i],gz[i]);const s=gsz[i]*PS;ctx.fillRect(PX,PY,s,s);
+        }
+      }
+
+      ctx.globalAlpha=.03;
+      for(let i=0;i<GN;i+=5){proj(gr[i],gth[i],gz[i]);const s=GS*.045*PS;ctx.drawImage(haze,PX-s/2,PY-s/2,s,s)}
+      ctx.globalAlpha=1;
+      drawStars(midIdx,TN);                              // near stars + drifting motes
+
+      // shooting star
+      nextShoot-=ddt;
+      if(nextShoot<=0&&!reduce){
+        const d=rnd()<.5?1:-1,an=.3+rnd()*.5,sp2=800+rnd()*500;
+        shoot={x:d>0?rnd()*W*.5:W*(.5+rnd()*.5),y:rnd()*H*.45,vx:Math.cos(an)*sp2*d,vy:Math.sin(an)*sp2,l:0,dur:.9+rnd()*.4};
+        nextShoot=6+rnd()*9;
+      }
+      if(shoot){
+        shoot.x+=shoot.vx*ddt;shoot.y+=shoot.vy*ddt;shoot.l+=ddt/shoot.dur;
+        if(shoot.l>=1)shoot=null;else{
+          const tx2=shoot.x-shoot.vx*.14,ty2=shoot.y-shoot.vy*.14;
+          const g=ctx.createLinearGradient(tx2,ty2,shoot.x,shoot.y);
+          g.addColorStop(0,'rgba(200,215,255,0)');g.addColorStop(1,'rgba(235,240,255,.9)');
+          ctx.globalAlpha=Math.sin(shoot.l*Math.PI);ctx.strokeStyle=g;ctx.lineWidth=1.2;
+          ctx.beginPath();ctx.moveTo(tx2,ty2);ctx.lineTo(shoot.x,shoot.y);ctx.stroke();ctx.globalAlpha=1;
+        }
+      }
+      raf=requestAnimationFrame(frame);
+    }
+    raf=requestAnimationFrame(frame);
+    return () => {
+      cancelAnimationFrame(raf);
+      off.forEach((fn) => fn());
+    };
+  }, []);
+
+  return (
+    <div
+      aria-hidden="true"
+      style={{ position: "fixed", inset: 0, zIndex: 0, pointerEvents: "none", background: "#020210", ...style }}
+    >
+      <canvas ref={canvasRef} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", display: "block" }} />
+      <div
+        style={{
+          position: "absolute", inset: 0,
+          background: "radial-gradient(ellipse at 52% 46%, transparent 50%, rgba(1,1,8,.62) 100%)",
+        }}
+      />
+    </div>
+  );
+}
+
+/* ============================================================================
+   SKY BACKGROUND (light theme) — drifting procedural clouds on a blue sky.
+   Clouds drift slowly, parallax with the cursor, and gently part around it.
+   ============================================================================ */
+
+function SkyBackground() {
+  const canvasRef = useRef(null);
+
+  useEffect(() => {
+    const cv = canvasRef.current, ctx = cv.getContext("2d");
+    const off = [], on = (el, ev, fn, o) => { el.addEventListener(ev, fn, o); off.push(() => el.removeEventListener(ev, fn, o)); };
+    const amb = matchMedia("(prefers-reduced-motion: reduce)").matches ? 0.25 : 1;
+    const rnd = Math.random;
+    let W = 0, H = 0, bg, raf = 0, t = 0, last = 0;
+
+    /* value-noise fBm, used once to paint the cloud sprites */
+    const nz = new Float32Array(65536); for (let i = 0; i < 65536; i++) nz[i] = rnd();
+    const vn = (x, y) => {
+      const xi = Math.floor(x), yi = Math.floor(y), fx = x - xi, fy = y - yi, u = fx * fx * (3 - 2 * fx), v = fy * fy * (3 - 2 * fy);
+      const x0 = xi & 255, y0 = yi & 255, x1 = (x0 + 1) & 255, y1 = (y0 + 1) & 255;
+      const a = nz[y0 * 256 + x0], b = nz[y0 * 256 + x1], c = nz[y1 * 256 + x0], d = nz[y1 * 256 + x1];
+      return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+    };
+    const fbm = (x, y, o) => { let s = 0, a = 0.5, f = 1; for (let i = 0; i < o; i++) { s += a * vn(x * f, y * f); f *= 2.03; a *= 0.5; } return s; };
+    const smooth = (a, b, x) => { const q = Math.min(1, Math.max(0, (x - a) / (b - a))); return q * q * (3 - 2 * q); };
+
+    function makeCloud(w, h, seed) {
+      const c = document.createElement("canvas"); c.width = w; c.height = h;
+      const g = c.getContext("2d"), im = g.createImageData(w, h), d = im.data;
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+        const dx = (x / w - 0.5) * 2, dy = (y / h - 0.5) * 2.2;
+        const m = Math.max(0, 1 - (dx * dx + dy * dy * 1.2));
+        const n = fbm((x / w) * 4 + seed, (y / h) * 3 + seed * 1.7, 5);
+        const a = smooth(0.26, 0.62, n * 1.15 * Math.pow(m, 0.7));
+        const shade = Math.min(1, 0.15 + (y / h) * 0.55 + (1 - n) * 0.35);
+        const i = (y * w + x) * 4;
+        d[i] = 255 - 38 * shade; d[i + 1] = 255 - 20 * shade; d[i + 2] = 255 - 4 * shade; d[i + 3] = a * 255;
+      }
+      g.putImageData(im, 0, 0);
+      return c;
+    }
+    const sprites = [1, 2, 3, 4].map((i) => makeCloud(320, 180, i * 7.3));
+
+    /* clouds: z = depth (1 = near / big / fast / strong parallax) */
+    const clouds = [{ fx: 0.1, fy: 0.02, z: 1, sw: 0.5, sp: 0 }];
+    for (let i = 0; i < 15; i++) {
+      const z = 0.25 + rnd() * 0.75;
+      clouds.push({ fx: rnd(), fy: rnd() * 0.85, z, sw: 0.12 + 0.28 * z, sp: i });
+    }
+    clouds.forEach((c, i) => { c.img = sprites[i % 4]; c.ph = rnd() * 6.28; c.ox = c.oy = c.vx = c.vy = 0; });
+    clouds.sort((a, b) => a.z - b.z);
+
+    const cam = { x: 0, y: 0, vx: 0, vy: 0 };
+    let ptX = 0, ptY = 0, nx = 0, ny = 0, mx = -9999, my = -9999, cvx = 0, cvy = 0, act = false, press = 0, pr = 0;
+    on(window, "pointermove", (e) => {
+      ptX = e.clientX; ptY = e.clientY; nx = ptX / W * 2 - 1; ny = ptY / H * 2 - 1;
+      if (!act) { mx = ptX; my = ptY; }
+      act = true;
+    }, { passive: true });
+    on(window, "pointerdown", () => { press = 1; });
+    on(window, "pointerup", () => { press = 0; });
+    on(document.documentElement, "pointerleave", () => { act = false; nx = ny = 0; press = 0; });
+    const specks = Array.from({ length: 70 }, () => ({ u: rnd(), v: rnd(), z: 0.2 + rnd() * 0.8, ph: rnd() * 6.28, ox: 0, oy: 0, vx: 0, vy: 0 }));
+    let sweep = null, nextSweep = 6;
+
+    function size() {
+      const dpr = Math.min(devicePixelRatio || 1, 1.75);
+      W = innerWidth; H = innerHeight;
+      cv.width = (W * dpr) | 0; cv.height = (H * dpr) | 0; ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      bg = ctx.createLinearGradient(0, 0, 0, H);
+      bg.addColorStop(0, "#1678ee"); bg.addColorStop(0.55, "#3aa6ff"); bg.addColorStop(1, "#9fdcff");
+    }
+    on(window, "resize", size); size();
+
+    function frame(now) {
+      const dt = Math.min(0.05, (now - last || 16) / 1000); last = now; t += dt;
+      cam.vx += ((nx * 0.9 + Math.sin(t * 0.11) * 0.08 * amb - cam.x) * 30 - cam.vx * 6) * dt; cam.x += cam.vx * dt;
+      cam.vy += ((ny * 0.9 + Math.cos(t * 0.09) * 0.06 * amb - cam.y) * 30 - cam.vy * 6) * dt; cam.y += cam.vy * dt;
+      if (act) {
+        const k = 1 - Math.exp(-dt * 12), px0 = mx, py0 = my, a = 1 - Math.exp(-dt * 8);
+        mx += (ptX - mx) * k; my += (ptY - my) * k;
+        cvx += ((mx - px0) / dt - cvx) * a; cvy += ((my - py0) / dt - cvy) * a;
+      } else { const a = 1 - Math.exp(-dt * 4); cvx -= cvx * a; cvy -= cvy * a; }
+      cvx = Math.max(-2000, Math.min(2000, cvx)); cvy = Math.max(-2000, Math.min(2000, cvy));
+
+      pr += ((press ? 1 : 0) - pr) * (1 - Math.exp(-dt * 6));
+      ctx.globalAlpha = 1; ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
+      const damp = Math.exp(-dt * 2.4);
+      for (const c of clouds) {
+        const cw = W * c.sw, ch = cw * 0.5625, Wp = W + 2 * cw, z = c.z;
+        const bx = ((((c.fx * Wp + t * (5 + 16 * z) * amb) % Wp) + Wp) % Wp) - cw;
+        const by = c.fy * H + Math.sin(t * 0.12 * amb + c.ph) * 6;
+        const px = bx + c.ox, py = by + c.oy;
+        let ax = -c.ox * 2.2, ay = -c.oy * 2.2;
+        if (act) {
+          const dx = px - mx, dy = py - my, d2 = dx * dx + dy * dy, R = 300 * (0.6 + z * 0.6) * (1 + pr * 0.3);
+          if (d2 < R * R) {
+            const d = Math.sqrt(d2) + 0.001, f = 1 - d / R, f2 = f * f;
+            ax += (dx / d) * 420 * (1 + pr * 1.8) * f2 * z + cvx * f2 * 0.4; ay += (dy / d) * 420 * (1 + pr * 1.8) * f2 * z + cvy * f2 * 0.4;
+          }
+        }
+        c.vx = (c.vx + ax * dt) * damp; c.vy = (c.vy + ay * dt) * damp; c.ox += c.vx * dt; c.oy += c.vy * dt;
+        ctx.globalAlpha = 0.5 + 0.45 * z;
+        ctx.drawImage(c.img, bx + c.ox - cam.x * (20 + 90 * z) - cw / 2, by + c.oy - cam.y * (10 + 45 * z) - ch / 2, cw, ch);
+      }
+      nextSweep -= dt;
+      if (nextSweep <= 0 && amb === 1) { sweep = { l: 0 }; nextSweep = 14 + rnd() * 10; }
+      if (sweep) {                                   // slow sunlight sweep (the sky's "shooting star")
+        sweep.l += dt / 4;
+        if (sweep.l >= 1) sweep = null;
+        else {
+          const x0 = -W * 0.3 + W * 1.6 * sweep.l;
+          const g = ctx.createLinearGradient(x0 - 140, 0, x0 + 140, 0);
+          g.addColorStop(0, "rgba(255,255,255,0)"); g.addColorStop(0.5, "rgba(255,255,255,1)"); g.addColorStop(1, "rgba(255,255,255,0)");
+          ctx.save(); ctx.transform(1, 0, -0.5, 1, 0, 0);
+          ctx.globalAlpha = Math.sin(sweep.l * Math.PI) * 0.14; ctx.fillStyle = g; ctx.fillRect(x0 - 140, 0, 280, H);
+          ctx.restore();
+        }
+      }
+      const Wp2 = W + 80, Hp2 = H + 80, dmp = Math.exp(-dt * 3.2);
+      ctx.fillStyle = "#fff";                        // drifting specks (the sky's "stars"): same spring physics
+      for (const p of specks) {
+        const z = p.z;
+        p.u = (p.u + dt * (0.002 + 0.004 * z) * amb) % 1; p.v = (p.v + dt * 0.0006 * amb) % 1;
+        const sh = 10 + 120 * z * z;
+        const bx = ((((p.u * Wp2 - cam.x * sh) % Wp2) + Wp2) % Wp2) - 40, by = ((((p.v * Hp2 - cam.y * sh * 0.7) % Hp2) + Hp2) % Hp2) - 40;
+        let ax = -p.ox * 8, ay = -p.oy * 8;
+        if (act) {
+          const dx = bx + p.ox - mx, dy = by + p.oy - my, d2 = dx * dx + dy * dy, R = 230 * (1 + pr * 0.35);
+          if (d2 < R * R) {
+            const d = Math.sqrt(d2) + 0.001, f = 1 - d / R, f2 = f * f, soft = Math.min(1, d / 70);
+            ax += -(dx / d) * 700 * (1 + pr * 1.8) * f2 * z * soft - (dy / d) * 260 * f2 * z + cvx * f2 * z * 0.55;
+            ay += -(dy / d) * 700 * (1 + pr * 1.8) * f2 * z * soft + (dx / d) * 260 * f2 * z + cvy * f2 * z * 0.55;
+          }
+        }
+        p.vx = (p.vx + ax * dt) * dmp; p.vy = (p.vy + ay * dt) * dmp; p.ox += p.vx * dt; p.oy += p.vy * dt;
+        ctx.globalAlpha = (0.25 + 0.5 * z) * (0.7 + 0.3 * Math.sin(t * (0.6 + z) + p.ph));
+        const sz = 1 + z * 2.2; ctx.fillRect(bx + p.ox, by + p.oy, sz, sz);
+      }
+      ctx.globalAlpha = 1;
+      raf = requestAnimationFrame(frame);
+    }
+    raf = requestAnimationFrame(frame);
+    return () => { cancelAnimationFrame(raf); off.forEach((fn) => fn()); };
+  }, []);
+
+  return (
+    <div aria-hidden="true" style={{ position: "fixed", inset: 0, zIndex: 0, pointerEvents: "none", background: "#3aa6ff" }}>
+      <canvas ref={canvasRef} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", display: "block" }} />
+    </div>
+  );
+}
+
+/* ============================================================================
+   CARD FX — "Magic Bento" effects on every glass box in the app (both themes):
+   cursor-following border glow, soft spotlight, hover particles, gentle
+   magnetism, click ripple. No dependencies; targets cards by their glass styling
+   so new boxes get it automatically. Sidebar/top bar are excluded.
+   ============================================================================ */
+
+const FX_SEL =
+  '.dashboard-stat-grid > div, .timer-panel, .billing-plan-card, .dashboard-side-panel, .dashboard-syllabus-card, [style*="backdrop-filter"]:not([style*="blur(18px)"])';
+
+function CardFX({ theme }) {
+  useEffect(() => {
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    if (!matchMedia("(hover: hover) and (pointer: fine)").matches) return;
+
+    const dark = theme === "dark";
+    const rgb = dark ? "132, 0, 255" : "20, 110, 255";
+    document.documentElement.style.setProperty("--glow-color", rgb);
+    const R = 300, prox = R * 0.5, fade = R * 0.75;
+
+    const sp = document.createElement("div");
+    sp.style.cssText =
+      "position:fixed;left:0;top:0;width:800px;height:800px;margin:-400px 0 0 -400px;border-radius:50%;pointer-events:none;z-index:1000;opacity:0;transition:opacity .35s ease;will-change:transform;" +
+      `background:radial-gradient(circle,rgba(${rgb},${dark ? 0.15 : 0.12}) 0%,rgba(${rgb},${dark ? 0.08 : 0.06}) 15%,rgba(${rgb},0.03) 30%,transparent 70%);` +
+      (dark ? "mix-blend-mode:screen;" : "");
+    document.body.appendChild(sp);
+
+    let cards = [], pend = false;
+    const refresh = () => { cards = Array.from(document.querySelectorAll(FX_SEL)); cards.forEach((c) => c.classList.add("fx-card")); };
+    refresh();
+    const mo = new MutationObserver(() => { if (!pend) { pend = true; setTimeout(() => { pend = false; refresh(); }, 150); } });
+    mo.observe(document.body, { childList: true, subtree: true });
+
+    let mxp = -1, myp = -1, raf = 0, mraf = 0, cur = null, layer = null;
+    const mags = new Map();
+
+    function enter(c) {
+      if (!c) return;
+      c.classList.add("fx-card");
+      layer = document.createElement("div"); layer.className = "fx-layer"; c.appendChild(layer);
+      for (let i = 0; i < 10; i++) {
+        const p = document.createElement("div"); p.className = "fx-particle";
+        p.style.left = Math.random() * 100 + "%"; p.style.top = Math.random() * 100 + "%";
+        layer.appendChild(p);
+        const rx = (Math.random() - 0.5) * 100, ry = (Math.random() - 0.5) * 100;
+        p.animate(
+          [{ transform: "translate(0,0) scale(0)", opacity: 0 }, { transform: `translate(${rx}px,${ry}px) scale(1)`, opacity: 0.9 }, { transform: `translate(${-rx}px,${-ry}px) scale(.6)`, opacity: 0.3 }],
+          { duration: 2500 + Math.random() * 2500, iterations: Infinity, direction: "alternate", easing: "ease-in-out", delay: i * 100, fill: "both" }
+        );
+      }
+    }
+    function leave(c) {
+      if (!c) return;
+      const l = layer; layer = null;
+      if (l) { const a = l.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 250, fill: "forwards" }); a.onfinish = () => l.remove(); }
+      const m = mags.get(c); if (m) { m.tx = 0; m.ty = 0; kick(); }
+    }
+    function magTick() {
+      mraf = 0;
+      let busy = false;
+      mags.forEach((m, c) => {
+        m.x += (m.tx - m.x) * 0.16; m.y += (m.ty - m.y) * 0.16;
+        if (Math.abs(m.tx - m.x) < 0.05 && Math.abs(m.ty - m.y) < 0.05 && !m.tx && !m.ty) { c.style.translate = ""; mags.delete(c); }
+        else { c.style.translate = `${m.x.toFixed(2)}px ${m.y.toFixed(2)}px`; busy = true; }
+      });
+      if (busy) mraf = requestAnimationFrame(magTick);
+    }
+    function kick() { if (!mraf) mraf = requestAnimationFrame(magTick); }
+
+    function tick() {
+      raf = 0;
+      let min = Infinity;
+      for (const c of cards) {
+        const r = c.getBoundingClientRect();
+        if (r.bottom < -R || r.top > innerHeight + R) continue;
+        const dx = Math.max(r.left - mxp, 0, mxp - r.right), dy = Math.max(r.top - myp, 0, myp - r.bottom);
+        const d = Math.hypot(dx, dy); min = Math.min(min, d);
+        const k = d <= prox ? 1 : d <= fade ? (fade - d) / (fade - prox) : 0;
+        c.style.setProperty("--glow-x", ((mxp - r.left) / r.width) * 100 + "%");
+        c.style.setProperty("--glow-y", ((myp - r.top) / r.height) * 100 + "%");
+        c.style.setProperty("--glow-intensity", k.toString());
+        c.style.setProperty("--glow-radius", R + "px");
+      }
+      sp.style.transform = `translate(${mxp}px,${myp}px)`;
+      sp.style.opacity = min <= prox ? 0.8 : min <= fade ? ((fade - min) / (fade - prox)) * 0.8 : 0;
+      if (cur) {
+        const r = cur.getBoundingClientRect();
+        const cl = (v) => Math.max(-8, Math.min(8, v));
+        const m = mags.get(cur) || { x: 0, y: 0, tx: 0, ty: 0 };
+        m.tx = cl((mxp - (r.left + r.width / 2)) * 0.03); m.ty = cl((myp - (r.top + r.height / 2)) * 0.03);
+        mags.set(cur, m); kick();
+      }
+    }
+    const onMove = (e) => {
+      mxp = e.clientX; myp = e.clientY;
+      const c = e.target instanceof Element ? e.target.closest(FX_SEL) : null;
+      if (c !== cur) { leave(cur); cur = c; enter(c); }
+      if (!raf) raf = requestAnimationFrame(tick);
+    };
+    const onOut = () => {
+      leave(cur); cur = null; sp.style.opacity = 0;
+      cards.forEach((c) => c.style.setProperty("--glow-intensity", "0"));
+    };
+    const onClick = (e) => {
+      const c = e.target instanceof Element ? e.target.closest(FX_SEL) : null;
+      if (!c || c !== cur || !layer) return;
+      const r = c.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
+      const md = Math.max(Math.hypot(x, y), Math.hypot(x - r.width, y), Math.hypot(x, y - r.height), Math.hypot(x - r.width, y - r.height));
+      const rp = document.createElement("div");
+      rp.style.cssText = `position:absolute;width:${md * 2}px;height:${md * 2}px;border-radius:50%;left:${x - md}px;top:${y - md}px;pointer-events:none;background:radial-gradient(circle,rgba(${rgb},0.4) 0%,rgba(${rgb},0.2) 30%,transparent 70%);`;
+      layer.appendChild(rp);
+      rp.animate([{ transform: "scale(0)", opacity: 1 }, { transform: "scale(1)", opacity: 0 }], { duration: 800, easing: "ease-out" }).onfinish = () => rp.remove();
+    };
+
+    document.addEventListener("pointermove", onMove, { passive: true });
+    document.addEventListener("click", onClick);
+    document.documentElement.addEventListener("mouseleave", onOut);
+    return () => {
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("click", onClick);
+      document.documentElement.removeEventListener("mouseleave", onOut);
+      mo.disconnect(); cancelAnimationFrame(raf); cancelAnimationFrame(mraf);
+      mags.forEach((m, c) => { c.style.translate = ""; });
+      document.querySelectorAll(".fx-layer").forEach((l) => l.remove());
+      sp.remove();
+    };
+  }, [theme]);
+  return null;
+}
+
 export default function StudentOS() {
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState(DEFAULT_PROFILE);
@@ -3087,14 +3656,25 @@ export default function StudentOS() {
   }
 
   if (!auth.loggedIn) {
-    return <LoginView onLogin={handleLogin} t={t} />;
+    return (
+      <>
+        {profile.theme === "dark" ? <SpaceBackground /> : <SkyBackground />}
+        <CardFX theme={profile.theme} />
+        <LoginView onLogin={handleLogin} t={t} />
+      </>
+    );
   }
 
   return (
+    <>
+    {profile.theme === "dark" ? <SpaceBackground /> : <SkyBackground />}
+        <CardFX theme={profile.theme} />
     <div
       data-theme={profile.theme}
       style={{
-        background: t.bg,
+        position: "relative",
+        zIndex: 1,
+        background: "transparent",
         color: t.text,
         fontFamily: "Inter, system-ui, -apple-system, sans-serif",
         width: "100%",
@@ -3110,6 +3690,7 @@ export default function StudentOS() {
         style={{
           display: "flex", alignItems: "center", justifyContent: "space-between",
           padding: "16px 22px", borderBottom: `1px solid ${t.border}`,
+          background: t.chrome, ...GLASS_CHROME,
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -3179,6 +3760,7 @@ export default function StudentOS() {
         <div
           style={{
             width: 176, borderRight: `1px solid ${t.border}`, padding: "16px 10px",
+            background: t.chrome, ...GLASS_CHROME,
             display: "flex", flexDirection: "column", gap: 2, flexShrink: 0,
           }}
         >
@@ -3301,7 +3883,7 @@ export default function StudentOS() {
                 />
 
                 <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                  <div className="dashboard-side-panel" style={{ background: t.surface, border: `1px solid ${t.border}`, borderRadius: 14, padding: 18 }}>
+                  <div className="dashboard-side-panel" style={{ background: t.surface, ...GLASS, border: `1px solid ${t.border}`, borderRadius: 14, padding: 18 }}>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
                       <span style={{ fontSize: 13.5, fontWeight: 600 }}>Today's plan</span>
                       <button
@@ -3328,7 +3910,7 @@ export default function StudentOS() {
                     )}
                   </div>
 
-                  <div className="dashboard-side-panel" style={{ background: t.surface, border: `1px solid ${t.border}`, borderRadius: 14, padding: 18 }}>
+                  <div className="dashboard-side-panel" style={{ background: t.surface, ...GLASS, border: `1px solid ${t.border}`, borderRadius: 14, padding: 18 }}>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
                       <span style={{ fontSize: 13.5, fontWeight: 600 }}>Recent sessions</span>
                       <button
@@ -3386,6 +3968,7 @@ export default function StudentOS() {
         </div>
       </div>
     </div>
+    </>
   );
 }
 
