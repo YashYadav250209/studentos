@@ -11,6 +11,7 @@ import {
   Search, X, Check, Building2, Bell, MapPin, FileText, Video, Link2,
   AlertCircle, Users, GraduationCap, PartyPopper, CreditCard, LogOut,
   Mail, Lock, Sparkles, ShieldCheck, Award, Play, Pause, RotateCcw,
+  Volume2, VolumeX, Settings, Cloud, Pencil, Trophy, UserPlus,
 } from "lucide-react";
 
 /* ============================================================================
@@ -27,6 +28,7 @@ const STORAGE_KEYS = {
   readNotices: "studentos:read-notices",
   auth: "studentos:auth",
   titleSystem: "studentos:title-system",
+  sound: "studentos:sound",
 };
 
 const DEFAULT_PROFILE = {
@@ -34,6 +36,8 @@ const DEFAULT_PROFILE = {
   examId: "jee",
   dailyGoalMinutes: 120,
   theme: "dark",
+  username: "",
+  avatar: { type: "orbis", id: "nova" },
   xp: 0,
   activeTitleId: null,
   streak: { current: 0, longest: 0, lastActiveDate: null },
@@ -639,6 +643,7 @@ const THEMES = {
     surface: "rgba(14, 13, 24, 0.86)",
     surfaceRaised: "rgba(22, 21, 36, 0.90)",
     chrome: "rgba(18, 16, 34, 0.38)",
+    popover: "rgba(20, 18, 36, 0.92)",
     border: "rgba(120, 110, 170, 0.26)",
     text: "#F7F5FC",
     textMuted: "#9B98AA",
@@ -649,6 +654,7 @@ const THEMES = {
     surface: "rgba(255, 255, 255, 0.64)",
     surfaceRaised: "rgba(244, 249, 255, 0.74)",
     chrome: "rgba(255, 255, 255, 0.38)",
+    popover: "rgba(255, 255, 255, 0.92)",
     border: "rgba(30, 90, 170, 0.24)",
     text: "#111827",
     textMuted: "#34445E",
@@ -3179,7 +3185,7 @@ function SkyBackground() {
    ============================================================================ */
 
 const FX_SEL =
-  '.dashboard-stat-grid > div, .timer-panel, .billing-plan-card, .dashboard-side-panel, .dashboard-syllabus-card, [style*="backdrop-filter"]:not([style*="blur(18px)"])';
+  '.dashboard-stat-grid > div, .timer-panel, .billing-plan-card, .dashboard-side-panel, .dashboard-syllabus-card, [style*="backdrop-filter"]:not([style*="blur(18px)"]):not([data-nofx])';
 
 function CardFX({ theme }) {
   useEffect(() => {
@@ -3256,13 +3262,6 @@ function CardFX({ theme }) {
       }
       sp.style.transform = `translate(${mxp}px,${myp}px)`;
       sp.style.opacity = min <= prox ? 0.8 : min <= fade ? ((fade - min) / (fade - prox)) * 0.8 : 0;
-      if (cur) {
-        const r = cur.getBoundingClientRect();
-        const cl = (v) => Math.max(-8, Math.min(8, v));
-        const m = mags.get(cur) || { x: 0, y: 0, tx: 0, ty: 0 };
-        m.tx = cl((mxp - (r.left + r.width / 2)) * 0.03); m.ty = cl((myp - (r.top + r.height / 2)) * 0.03);
-        mags.set(cur, m); kick();
-      }
     }
     const onMove = (e) => {
       mxp = e.clientX; myp = e.clientY;
@@ -3299,6 +3298,1049 @@ function CardFX({ theme }) {
     };
   }, [theme]);
   return null;
+}
+
+/* ============================================================================
+   AUDIO — procedural ambient environments (Web Audio API).
+   Nothing is downloaded or sampled: Sky and Orbit are synthesized live, so there
+   is no loop point, no file, and no licensing. AUDIO_ENVIRONMENTS is a registry:
+   to add Brown Noise / Rain / Café / Focus sounds later, add one entry with a
+   build(ctx, out) function (kind: "focus" keeps it out of the theme-sound UI).
+   ============================================================================ */
+
+const rand = (a, b) => a + Math.random() * (b - a);
+
+const AUDIO_ENVIRONMENTS = {
+  sky: { id: "sky", label: "Sky", kind: "theme", theme: "light", build: buildSky },
+  orbit: { id: "orbit", label: "Orbit", kind: "theme", theme: "dark", build: buildOrbit },
+};
+const DEFAULT_SOUND = { enabled: false, volume: 0.5, atmosphere: { light: "sky", dark: "orbit" } };
+
+/* Noise buffer whose tail is equal-power crossfaded into its head, so looping it is seamless. */
+function makeNoiseBuffer(ctx, seconds, pink) {
+  const sr = ctx.sampleRate, N = Math.floor(seconds * sr), F = Math.floor(sr * 1.5), raw = new Float32Array(N + F);
+  let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
+  for (let i = 0; i < raw.length; i++) {
+    const w = Math.random() * 2 - 1;
+    if (pink) {
+      b0 = 0.99886 * b0 + w * 0.0555179; b1 = 0.99332 * b1 + w * 0.0750759; b2 = 0.969 * b2 + w * 0.153852;
+      b3 = 0.8665 * b3 + w * 0.3104856; b4 = 0.55 * b4 + w * 0.5329522; b5 = -0.7616 * b5 - w * 0.016898;
+      raw[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + w * 0.5362) * 0.11; b6 = w * 0.115926;
+    } else raw[i] = w * 0.5;
+  }
+  const buf = ctx.createBuffer(1, N, sr), out = buf.getChannelData(0);
+  out.set(raw.subarray(0, N));
+  for (let i = 0; i < F; i++) { const k = (i / F) * Math.PI / 2; out[i] = raw[i] * Math.sin(k) + raw[N + i] * Math.cos(k); }
+  return buf;
+}
+
+function makeImpulse(ctx, seconds, decay) {
+  const sr = ctx.sampleRate, len = (sr * seconds) | 0, buf = ctx.createBuffer(2, len, sr);
+  for (let c = 0; c < 2; c++) { const d = buf.getChannelData(c); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, decay); }
+  return buf;
+}
+
+/* Shared toolkit for building an environment; stop() tears everything down cleanly. */
+function audioKit(ctx, out) {
+  const nodes = [], timers = [];
+  let stopped = false;
+  const kit = {
+    bus: (gain) => { const g = ctx.createGain(); g.gain.value = gain; g.connect(out); return g; },
+    lfo: (param, hz, depth) => {
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.frequency.value = hz; g.gain.value = depth; o.connect(g); g.connect(param); o.start(); nodes.push(o);
+    },
+    osc: (type, freq, detune, dest) => {
+      const o = ctx.createOscillator(); o.type = type; o.frequency.value = freq; o.detune.value = detune; o.connect(dest); o.start(); nodes.push(o);
+    },
+    noise: (pink, dest) => {
+      const n = ctx.createBufferSource(); n.buffer = makeNoiseBuffer(ctx, 9, pink); n.loop = true; n.connect(dest); n.start(); nodes.push(n);
+    },
+    filter: (type, freq, q, dest) => { const f = ctx.createBiquadFilter(); f.type = type; f.frequency.value = freq; f.Q.value = q; f.connect(dest); return f; },
+    gain: (v, dest) => { const g = ctx.createGain(); g.gain.value = v; g.connect(dest); return g; },
+    /* soft sine "star": slow bloom, long decay, random stereo position */
+    ping: (freq, peak, attack, decay, dest) => {
+      const t = ctx.currentTime, o = ctx.createOscillator(), g = ctx.createGain();
+      o.type = "sine"; o.frequency.value = freq;
+      g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(peak, t + attack); g.gain.exponentialRampToValueAtTime(0.0001, t + attack + decay);
+      o.connect(g);
+      if (ctx.createStereoPanner) { const p = ctx.createStereoPanner(); p.pan.value = rand(-0.8, 0.8); g.connect(p); p.connect(dest); } else g.connect(dest);
+      o.start(t); o.stop(t + attack + decay + 0.2);
+    },
+    every: (minMs, maxMs, fn, firstMs) => {
+      const run = () => { if (stopped) return; fn(); timers.push(setTimeout(run, rand(minMs, maxMs))); };
+      timers.push(setTimeout(run, firstMs ?? rand(minMs, maxMs)));
+    },
+    stop: () => {
+      stopped = true; timers.forEach(clearTimeout);
+      nodes.forEach((n) => { try { n.stop(); } catch { /* already stopped */ } });
+    },
+  };
+  return kit;
+}
+
+/* ORBIT (night): warm suspended-chord pad that never repeats exactly, drifting cosmic
+   air, and distant star pings. Deeper and more enclosed than Sky. */
+function buildOrbit(ctx, out) {
+  const k = audioKit(ctx, out), bus = k.bus(0.9);
+  const warm = k.filter("lowpass", 900, 0.3, bus);
+  k.lfo(warm.frequency, 0.021, 380);
+  // A sus2 voicing (A E B E B) + a soft root; each voice has its own very slow swell
+  const voices = [[55, 0.035], [82.41, 0.05], [110, 0.1], [164.81, 0.075], [246.94, 0.05], [329.63, 0.04], [493.88, 0.018]];
+  voices.forEach(([f, a]) => {
+    const g = k.gain(a, warm); k.lfo(g.gain, 1 / rand(14, 40), a * 0.55);
+    [-5, 5].forEach((d) => k.osc(f < 150 ? "triangle" : "sine", f, d + rand(-1.5, 1.5), g));
+  });
+  // cosmic texture: slowly sweeping band of pink noise + a trace of high "dust"
+  const sweep = k.filter("bandpass", 700, 0.9, k.gain(0.065, bus)); k.lfo(sweep.frequency, 0.017, 380);
+  k.noise(true, sweep);
+  const dust = k.filter("highpass", 5200, 0.5, k.gain(0.006, bus)); k.noise(false, dust);
+  const stars = [1318.5, 1568, 1760, 1975.5, 2349.3, 2637];
+  k.every(6000, 17000, () => k.ping(stars[(Math.random() * stars.length) | 0] * (Math.random() < 0.3 ? 0.5 : 1), rand(0.01, 0.022), rand(0.35, 0.8), rand(4, 6.5), bus), rand(3000, 7000));
+  return { stop: () => { k.stop(); try { bus.disconnect(); } catch { /* noop */ } } };
+}
+
+/* SKY (day): airy, high-register open chord, a soft breeze that gusts and settles,
+   and the occasional faint sparkle. Brighter and more open than Orbit; no low end. */
+function buildSky(ctx, out) {
+  const k = audioKit(ctx, out), bus = k.bus(0.85);
+  const clear = k.filter("highpass", 150, 0.5, bus);
+  const gust = k.gain(1, bus);
+  const breeze = k.filter("bandpass", 900, 0.6, k.gain(0.075, gust)); k.lfo(breeze.frequency, 0.031, 450);
+  k.noise(true, breeze);
+  const air = k.filter("highpass", 3500, 0.4, k.filter("lowpass", 9000, 0.4, k.gain(0.012, gust)));
+  k.noise(false, air);
+  k.every(9000, 22000, () => gust.gain.setTargetAtTime(rand(0.55, 1.25), ctx.currentTime, 3), 4000);
+  // D lydian-flavoured open voicing, kept in the upper register for brightness
+  const bright = k.filter("lowpass", 4200, 0.3, clear); k.lfo(bright.frequency, 0.026, 1100);
+  [[146.83, 0.03], [220, 0.04], [293.66, 0.06], [440, 0.05], [659.25, 0.03], [739.99, 0.02]].forEach(([f, a]) => {
+    const g = k.gain(a, bright); k.lfo(g.gain, 1 / rand(12, 35), a * 0.55);
+    [-4, 4].forEach((d) => k.osc("sine", f, d + rand(-1.5, 1.5), g));
+  });
+  const sparkle = [1174.66, 1318.51, 1479.98, 1760, 1975.53, 2349.32, 2959.96];
+  k.every(4500, 13000, () => {
+    const f = sparkle[(Math.random() * sparkle.length) | 0];
+    k.ping(f, rand(0.006, 0.012), rand(0.01, 0.03), rand(1.4, 2.4), bus);
+    if (Math.random() < 0.25) setTimeout(() => k.ping(sparkle[(Math.random() * sparkle.length) | 0], rand(0.004, 0.008), 0.02, rand(1.2, 2), bus), rand(120, 250));
+  }, rand(2500, 5000));
+  return { stop: () => { k.stop(); try { bus.disconnect(); } catch { /* noop */ } } };
+}
+
+/* Engine singleton: one AudioContext, one master volume, crossfades between environments.
+   The context is only created after the first user gesture (browser autoplay rules). */
+const audioEngine = (() => {
+  let ctx = null, master = null, send = null, cur = null;
+  let unlocked = false, last = null, suspendT = 0;
+  const level = (v) => Math.pow(v, 1.8) * 0.8;
+
+  function ensure() {
+    if (ctx) return ctx;
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return null;
+    ctx = new AC();
+    master = ctx.createGain(); master.gain.value = 0;
+    const comp = ctx.createDynamicsCompressor();
+    comp.threshold.value = -20; comp.ratio.value = 3; comp.attack.value = 0.05; comp.release.value = 0.4;
+    master.connect(comp); comp.connect(ctx.destination);
+    const verb = ctx.createConvolver(); verb.buffer = makeImpulse(ctx, 4.5, 2.4); verb.connect(master);
+    send = ctx.createGain(); send.gain.value = 1; send.connect(verb);
+    return ctx;
+  }
+  function fadeOut(env, tau) {
+    const t = ctx.currentTime;
+    env.gain.gain.cancelScheduledValues(t); env.gain.gain.setValueAtTime(env.gain.gain.value, t); env.gain.gain.setTargetAtTime(0, t, tau);
+    setTimeout(() => { env.handle.stop(); try { env.gain.disconnect(); } catch { /* noop */ } }, 4000);
+  }
+  function start(id) {
+    const def = AUDIO_ENVIRONMENTS[id];
+    if (!def || (cur && cur.id === id)) return;
+    if (cur) fadeOut(cur, 0.55);                       // old environment dissolves (~2s)...
+    const gain = ctx.createGain(); gain.gain.value = 0; gain.connect(master);
+    const wet = ctx.createGain(); wet.gain.value = 0.45; gain.connect(wet); wet.connect(send);
+    const handle = def.build(ctx, gain);
+    const t = ctx.currentTime;
+    gain.gain.setTargetAtTime(1, t + 0.15, 0.6);       // ...while the new one blooms in (~2s)
+    cur = { id, gain, handle };
+  }
+  function apply(a) {
+    last = a;
+    if (!unlocked) return;                             // never start before a user gesture
+    if (!a.enabled) {
+      if (!ctx) return;
+      master.gain.cancelScheduledValues(ctx.currentTime); master.gain.setTargetAtTime(0, ctx.currentTime, 0.35);
+      clearTimeout(suspendT);
+      suspendT = setTimeout(() => { if (cur) { fadeOut(cur, 0.05); cur = null; } if (ctx.state === "running") ctx.suspend(); }, 1800);
+      return;
+    }
+    if (!ensure()) return;
+    clearTimeout(suspendT);
+    if (ctx.state === "suspended") ctx.resume();
+    start(a.envId);
+    const t = ctx.currentTime, fresh = master.gain.value < 0.001;
+    master.gain.cancelScheduledValues(t); master.gain.setTargetAtTime(level(a.volume), t, fresh ? 0.7 : 0.1);
+  }
+  return {
+    unlock() { if (unlocked) return; unlocked = true; if (last) apply(last); },
+    sync: apply,
+  };
+})();
+
+function loadSoundPrefs() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(STORAGE_KEYS.sound) || "null");
+    if (!saved) return DEFAULT_SOUND;
+    return { ...DEFAULT_SOUND, ...saved, atmosphere: { ...DEFAULT_SOUND.atmosphere, ...(saved.atmosphere || {}) } };
+  } catch { return DEFAULT_SOUND; }
+}
+
+/* Theme Sound state: persisted per device (volume/on-off are device preferences), follows the theme. */
+function useThemeSound(theme) {
+  const [prefs, setPrefs] = useState(loadSoundPrefs);
+  useEffect(() => {
+    const go = () => audioEngine.unlock();
+    window.addEventListener("pointerdown", go, { once: true });
+    window.addEventListener("keydown", go, { once: true });
+    return () => { window.removeEventListener("pointerdown", go); window.removeEventListener("keydown", go); };
+  }, []);
+  useEffect(() => { try { localStorage.setItem(STORAGE_KEYS.sound, JSON.stringify(prefs)); } catch { /* storage unavailable */ } }, [prefs]);
+  useEffect(() => {
+    audioEngine.sync({ enabled: prefs.enabled, volume: prefs.volume, envId: prefs.atmosphere[theme] });
+  }, [prefs, theme]);
+  return {
+    prefs,
+    env: AUDIO_ENVIRONMENTS[prefs.atmosphere[theme]],
+    setEnabled: (enabled) => { audioEngine.unlock(); setPrefs((p) => ({ ...p, enabled })); },
+    setVolume: (volume) => setPrefs((p) => ({ ...p, volume })),
+  };
+}
+
+/* Sidebar control: Theme Sound toggle + Settings button that opens a small sound panel. */
+function SoundControl({ sound, theme, t }) {
+  const [open, setOpen] = useState(false);
+  const boxRef = useRef(null);
+  const on = sound.prefs.enabled;
+  useEffect(() => {
+    if (!open) return;
+    const down = (e) => { if (boxRef.current && !boxRef.current.contains(e.target)) setOpen(false); };
+    const key = (e) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("pointerdown", down); document.addEventListener("keydown", key);
+    return () => { document.removeEventListener("pointerdown", down); document.removeEventListener("keydown", key); };
+  }, [open]);
+
+  const rowStyle = (active) => ({
+    display: "flex", alignItems: "center", gap: 10, padding: "9px 10px", borderRadius: 8, border: "none",
+    fontSize: 13, fontWeight: 500, cursor: "pointer", textAlign: "left", width: "100%",
+    color: active ? t.text : t.textMuted,
+  });
+  const atmos = [
+    { key: "light", tag: "Day", Icon: Cloud },
+    { key: "dark", tag: "Night", Icon: Moon },
+  ].map((a) => ({ ...a, env: AUDIO_ENVIRONMENTS[sound.prefs.atmosphere[a.key]] })).filter((a) => a.env?.kind === "theme");
+
+  return (
+    <div ref={boxRef} style={{ marginTop: "auto", position: "relative", paddingTop: 10, borderTop: `1px solid ${t.border}`, display: "flex", flexDirection: "column", gap: 2 }}>
+      {open && (
+        <div
+          className="sound-pop" data-nofx role="dialog" aria-label="Sound settings"
+          style={{
+            position: "absolute", bottom: "calc(100% + 8px)", left: 0, width: 244, zIndex: 50, padding: 12, borderRadius: 14,
+            background: t.popover, border: `1px solid ${t.border}`, boxShadow: "var(--shadow-hover)",
+            backdropFilter: "blur(20px) saturate(1.2)", WebkitBackdropFilter: "blur(20px) saturate(1.2)", color: t.text,
+          }}
+        >
+          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10 }}>Sound</div>
+          <button className="sound-row" onClick={() => sound.setEnabled(!on)} role="switch" aria-checked={on} style={{ ...rowStyle(true), padding: "8px 8px" }}>
+            <span style={{ flex: 1 }}>Theme Sound</span>
+            <span className={`sound-switch${on ? " is-on" : ""}`}><span className="sound-switch__knob" /></span>
+          </button>
+          <div style={{ padding: "10px 8px 4px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: t.textMuted, marginBottom: 8 }}>
+              <span>Volume</span>
+              <span style={{ fontVariantNumeric: "tabular-nums" }}>{Math.round(sound.prefs.volume * 100)}%</span>
+            </div>
+            <input
+              className="sound-range" type="range" min="0" max="100" step="1" aria-label="Volume"
+              value={Math.round(sound.prefs.volume * 100)}
+              onChange={(e) => sound.setVolume(Number(e.target.value) / 100)}
+              style={{ "--fill": `${Math.round(sound.prefs.volume * 100)}%`, opacity: on ? 1 : 0.5 }}
+            />
+          </div>
+          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: t.textFaint, padding: "10px 8px 6px" }}>Atmosphere</div>
+          {atmos.map(({ key, tag, Icon, env }) => {
+            const current = key === theme;
+            return (
+              <div key={key} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 8px", borderRadius: 8, background: current ? `${ACCENT}1A` : "transparent", transition: "background 200ms ease" }}>
+                <Icon size={15} strokeWidth={2.1} color={current ? ACCENT : t.textMuted} />
+                <span style={{ fontSize: 13, fontWeight: current ? 600 : 500, color: current ? t.text : t.textMuted, flex: 1 }}>{env.label}</span>
+                <span style={{ fontSize: 11, color: t.textFaint }}>{current && on ? "Playing" : tag}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      <button className="sound-row" onClick={() => sound.setEnabled(!on)} role="switch" aria-checked={on} aria-label="Theme Sound" style={rowStyle(on)}>
+        <span key={on ? "on" : "off"} className="sound-ico" style={{ display: "inline-flex" }}>
+          {on ? <Volume2 size={15} strokeWidth={2.1} /> : <VolumeX size={15} strokeWidth={2.1} />}
+        </span>
+        <span style={{ flex: 1 }}>Theme Sound</span>
+        <span className={`sound-switch${on ? " is-on" : ""}`}><span className="sound-switch__knob" /></span>
+      </button>
+      <button className="sound-row" onClick={() => setOpen((o) => !o)} aria-haspopup="dialog" aria-expanded={open} style={rowStyle(open)}>
+        <Settings size={15} strokeWidth={2.1} />
+        <span style={{ flex: 1 }}>Settings</span>
+      </button>
+    </div>
+  );
+}
+
+/* ============================================================================
+   PROFILE SYSTEM — display name, unique @username, and avatars (Google photo or a
+   curated Orbis avatar; no file uploads). Data lives on the existing profile record
+   (name, username, avatar), so it persists through the same Supabase/local storage
+   as everything else. Usernames are made unique by a small `studentos_usernames`
+   table (see usernames.sql); without Supabase a local registry is used.
+   ============================================================================ */
+
+const RESERVED_USERNAMES = new Set(["admin", "administrator", "root", "support", "orbis", "studentos", "moderator", "mod", "staff", "help", "system", "owner", "teacher", "null", "undefined", "api", "www"]);
+const LOCAL_USERNAMES_KEY = "studentos:usernames";
+
+const normalizeUsername = (v) => String(v || "").trim().replace(/^@+/, "").replace(/\s+/g, "").toLowerCase();
+function validateUsername(u) {
+  if (!u) return "Choose a username";
+  if (u.length < 3) return "At least 3 characters";
+  if (u.length > 20) return "20 characters at most";
+  if (!/^[a-z0-9_]+$/.test(u)) return "Letters, numbers and underscores only";
+  if (RESERVED_USERNAMES.has(u)) return "That username is reserved";
+  return null;
+}
+
+const usernameApi = {
+  async identity() {
+    if (isSupabaseConfigured) {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) return { remote: true, id: session.user.id };
+    }
+    return { remote: false, id: null };
+  },
+  async check(username, ownerKey) {
+    const me = await usernameApi.identity();
+    if (me.remote) {
+      const { data, error } = await supabase.from("studentos_usernames").select("user_id").eq("username", username).maybeSingle();
+      if (error) return { status: "unverified" };           // table not set up yet: don't block the user
+      return { status: data && data.user_id !== me.id ? "taken" : "available" };
+    }
+    try {
+      const map = JSON.parse(localStorage.getItem(LOCAL_USERNAMES_KEY) || "{}");
+      if (map[username] && map[username] !== ownerKey) return { status: "taken" };
+    } catch { /* storage unavailable */ }
+    return { status: "available" };
+  },
+  async claim(username, ownerKey, previous) {
+    const me = await usernameApi.identity();
+    if (me.remote) {
+      const { error } = await supabase.from("studentos_usernames").upsert({ user_id: me.id, username }, { onConflict: "user_id" });
+      if (!error) return { ok: true };
+      if (error.code === "23505") return { ok: false, error: "taken" };
+      if (error.code === "42P01" || error.code === "PGRST205") return { ok: true };   // table missing: save profile anyway
+      return { ok: false, error: "failed" };
+    }
+    try {
+      const map = JSON.parse(localStorage.getItem(LOCAL_USERNAMES_KEY) || "{}");
+      if (map[username] && map[username] !== ownerKey) return { ok: false, error: "taken" };
+      if (previous && map[previous] === ownerKey) delete map[previous];
+      map[username] = ownerKey;
+      localStorage.setItem(LOCAL_USERNAMES_KEY, JSON.stringify(map));
+    } catch { /* storage unavailable */ }
+    return { ok: true };
+  },
+};
+
+/* Google photo from the Supabase session (only when the account signed in with Google). */
+function useGoogleAvatar(loggedIn) {
+  const [g, setG] = useState({ status: "loading", url: null });
+  useEffect(() => {
+    let alive = true;
+    if (!isSupabaseConfigured || !loggedIn) { setG({ status: "none", url: null }); return undefined; }
+    supabase.auth.getSession().then(({ data }) => {
+      if (!alive) return;
+      const u = data.session?.user;
+      const viaGoogle = u?.app_metadata?.provider === "google" || (u?.identities || []).some((i) => i.provider === "google");
+      const url = viaGoogle ? (u.user_metadata?.avatar_url || u.user_metadata?.picture || null) : null;
+      setG({ status: url ? "ready" : "none", url });
+    }).catch(() => alive && setG({ status: "none", url: null }));
+    return () => { alive = false; };
+  }, [loggedIn]);
+  return g;
+}
+
+/* Curated avatars: abstract, calm, space-themed; c = [bg1, bg2, accent, accent2]. */
+const ORBIS_AVATARS = [
+  { id: "nova", name: "Nova", motif: "planet", c: ["#14123a", "#4b3aa8", "#9fb8ff", "#5b6cff"] },
+  { id: "eclipse", name: "Eclipse", motif: "eclipse", c: ["#0b0a1f", "#2a1b5c", "#ffb86b", "#ff5e3a"] },
+  { id: "luna", name: "Luna", motif: "crescent", c: ["#10172e", "#26437a", "#f3f0ff", "#b7c4ff"] },
+  { id: "orbit", name: "Orbit", motif: "orbits", c: ["#0e1a2c", "#1d4f6e", "#7be0d6", "#3aa6ff"] },
+  { id: "vega", name: "Vega", motif: "constellation", c: ["#0d0f24", "#2c2a6b", "#ffffff", "#a7b0ff"] },
+  { id: "nebula", name: "Nebula", motif: "nebula", c: ["#1a0f33", "#5a2a7a", "#ff8fd0", "#7a5cff"] },
+  { id: "comet", name: "Comet", motif: "comet", c: ["#0b1530", "#1b3f8f", "#bfe3ff", "#4aa3ff"] },
+  { id: "aurora", name: "Aurora", motif: "aurora", c: ["#071a1e", "#134a4a", "#7cf5c8", "#4a8cff"] },
+  { id: "pulsar", name: "Pulsar", motif: "burst", c: ["#140b2a", "#3a1d6e", "#ffe3a3", "#ff9d5c"] },
+  { id: "dawn", name: "Dawn", motif: "horizon", c: ["#2a1646", "#c2578a", "#ffd8a0", "#ff8a5c"] },
+  { id: "twin", name: "Twin", motif: "twin", c: ["#101a33", "#2b3f7a", "#a8c0ff", "#ffd1a8"] },
+  { id: "prism", name: "Prism", motif: "prism", c: ["#0f1224", "#33306b", "#9ad0ff", "#b48cff"] },
+];
+const ORBIS_AVATAR_MAP = Object.fromEntries(ORBIS_AVATARS.map((a) => [a.id, a]));
+
+function OrbisAvatarArt({ id }) {
+  const def = ORBIS_AVATAR_MAP[id] || ORBIS_AVATARS[0];
+  const [c1, c2, ac, ac2] = def.c, g = `ov-${def.id}`, orb = `url(#${g}-o)`;
+  let motif;
+  switch (def.motif) {
+    case "planet": motif = (<><ellipse cx="32" cy="33" rx="23" ry="6.5" transform="rotate(-22 32 33)" fill="none" stroke="#fff" strokeOpacity=".5" strokeWidth="1.5" /><circle cx="32" cy="33" r="13" fill={orb} /><circle cx="49" cy="19" r="2.6" fill="#fff" fillOpacity=".85" /></>); break;
+    case "eclipse": motif = (<><circle cx="32" cy="32" r="21" fill="none" stroke={ac} strokeOpacity=".22" strokeWidth="1.2" /><circle cx="32" cy="32" r="15" fill="#07061a" stroke={orb} strokeWidth="2.4" /></>); break;
+    case "crescent": motif = (<><mask id={`${g}-m`}><rect width="64" height="64" fill="#fff" /><circle cx="38.5" cy="28" r="12.5" fill="#000" /></mask><circle cx="31" cy="33" r="15" fill={orb} mask={`url(#${g}-m)`} /></>); break;
+    case "orbits": motif = (<><g fill="none" stroke={ac} strokeOpacity=".55" strokeWidth="1.1"><ellipse cx="32" cy="32" rx="22" ry="8" transform="rotate(30 32 32)" /><ellipse cx="32" cy="32" rx="22" ry="8" transform="rotate(-30 32 32)" /><ellipse cx="32" cy="32" rx="22" ry="8" /></g><circle cx="32" cy="32" r="5" fill={orb} /><circle cx="52" cy="32" r="2.2" fill="#fff" /><circle cx="21" cy="13" r="2" fill={ac2} /></>); break;
+    case "constellation": motif = (<><polyline points="12,44 24,26 36,36 46,18 54,30" fill="none" stroke={ac} strokeOpacity=".5" strokeWidth="1" /><g fill="#fff">{[[12, 44, 2], [24, 26, 2.6], [36, 36, 1.8], [46, 18, 3], [54, 30, 2]].map(([x, y, r]) => <circle key={x} cx={x} cy={y} r={r} />)}</g></>); break;
+    case "nebula": motif = (<><filter id={`${g}-f`}><feGaussianBlur stdDeviation="5" /></filter><g filter={`url(#${g}-f)`}><circle cx="26" cy="32" r="14" fill={ac} fillOpacity=".75" /><circle cx="40" cy="26" r="12" fill={ac2} fillOpacity=".7" /><circle cx="36" cy="42" r="10" fill="#fff" fillOpacity=".35" /></g></>); break;
+    case "comet": motif = (<><path d="M10 54 L44 22" stroke={`url(#${g}-t)`} strokeWidth="5" strokeLinecap="round" /><circle cx="46" cy="20" r="6.5" fill={orb} /></>); break;
+    case "aurora": motif = (<><path d="M-2 40 C14 24 28 50 44 34 S60 30 66 34" fill="none" stroke={ac} strokeWidth="4" strokeLinecap="round" strokeOpacity=".85" /><path d="M-2 31 C14 16 28 42 44 26 S60 22 66 26" fill="none" stroke={ac2} strokeWidth="3" strokeLinecap="round" strokeOpacity=".6" /></>); break;
+    case "burst": motif = (<path d="M32 9 L36.5 27.5 L55 32 L36.5 36.5 L32 55 L27.5 36.5 L9 32 L27.5 27.5 Z" fill={orb} />); break;
+    case "horizon": motif = (<><circle cx="32" cy="40" r="14" fill={orb} /><rect y="40" width="64" height="24" fill="#150d2e" fillOpacity=".92" /><path d="M12 46H52M18 51H46M24 56H40" stroke="#fff" strokeOpacity=".3" /></>); break;
+    case "twin": motif = (<><circle cx="26" cy="37" r="12.5" fill={orb} /><circle cx="46" cy="22" r="6" fill={ac2} /><circle cx="46" cy="22" r="9.5" fill="none" stroke={ac2} strokeOpacity=".35" /></>); break;
+    default: motif = (<><polygon points="32,11 51,28 32,53 13,28" fill={orb} /><polygon points="32,11 51,28 32,34 13,28" fill="#fff" fillOpacity=".28" /><polygon points="32,34 51,28 32,53" fill="#000" fillOpacity=".2" /></>);
+  }
+  return (
+    <svg viewBox="0 0 64 64" width="100%" height="100%" aria-hidden="true" style={{ display: "block" }}>
+      <defs>
+        <linearGradient id={`${g}-bg`} x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor={c1} /><stop offset="1" stopColor={c2} /></linearGradient>
+        <radialGradient id={`${g}-o`} cx=".35" cy=".3" r=".9"><stop offset="0" stopColor={ac} /><stop offset="1" stopColor={ac2} /></radialGradient>
+        <linearGradient id={`${g}-t`} x1="0" y1="1" x2="1" y2="0"><stop offset="0" stopColor={ac} stopOpacity="0" /><stop offset="1" stopColor="#fff" /></linearGradient>
+      </defs>
+      <rect width="64" height="64" fill={`url(#${g}-bg)`} />
+      <g fill="#fff" fillOpacity=".6"><circle cx="11" cy="13" r=".8" /><circle cx="53" cy="9" r=".7" /><circle cx="57" cy="50" r=".9" /><circle cx="9" cy="54" r=".7" /></g>
+      {motif}
+    </svg>
+  );
+}
+
+/* Reusable avatar: Google photo, Orbis avatar, or initials fallback. Use everywhere identity is shown. */
+function Avatar({ avatar, name, size = 36, style }) {
+  const [broken, setBroken] = useState(false);
+  const a = avatar || DEFAULT_PROFILE.avatar;
+  useEffect(() => { setBroken(false); }, [a.googleUrl]);
+  let inner;
+  if (a.type === "google" && a.googleUrl && !broken) {
+    inner = <img src={a.googleUrl} alt="" referrerPolicy="no-referrer" draggable={false} onError={() => setBroken(true)} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />;
+  } else if (a.type === "orbis" && ORBIS_AVATAR_MAP[a.id]) {
+    inner = <OrbisAvatarArt id={a.id} />;
+  } else {
+    inner = <span style={{ display: "flex", width: "100%", height: "100%", alignItems: "center", justifyContent: "center", background: "linear-gradient(135deg,#14123a,#4b3aa8)", color: "#fff", fontWeight: 600, fontSize: size * 0.42 }}>{(name || "?").trim().charAt(0).toUpperCase()}</span>;
+  }
+  return (
+    <span className="avatar" style={{ width: size, height: size, ...style }}>{inner}</span>
+  );
+}
+
+/* Sidebar entry: avatar + name + @username. */
+function ProfileButton({ profile, active, onClick, t }) {
+  return (
+    <button className={`profile-btn${active ? " is-active" : ""}`} onClick={onClick} aria-label="Open your profile" aria-current={active ? "page" : undefined}>
+      <Avatar avatar={profile.avatar} name={profile.name} size={30} />
+      <span style={{ minWidth: 0, flex: 1, display: "flex", flexDirection: "column", textAlign: "left", lineHeight: 1.25 }}>
+        <span style={{ fontSize: 13, fontWeight: 600, color: t.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{profile.name}</span>
+        <span style={{ fontSize: 11, color: t.textFaint, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{profile.username ? `@${profile.username}` : "Set username"}</span>
+      </span>
+      <ChevronRight className="profile-btn__chev" size={14} color={t.textMuted} />
+    </button>
+  );
+}
+
+function ProfileView({ profile, auth, google, planName, onSave, t }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(null);
+  const [picking, setPicking] = useState(false);
+  const [source, setSource] = useState("orbis");
+  const [ustate, setUstate] = useState({ status: "idle" });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [savedFlash, setSavedFlash] = useState(false);
+  const ownerKey = auth.email || "guest";
+  const hasGoogle = google.status === "ready";
+  const view = editing && draft ? draft : { name: profile.name, username: profile.username || "", avatar: profile.avatar || DEFAULT_PROFILE.avatar };
+
+  const startEdit = () => {
+    setDraft({ name: profile.name, username: profile.username || "", avatar: profile.avatar || DEFAULT_PROFILE.avatar });
+    setSource(profile.avatar?.type === "google" ? "google" : "orbis");
+    setPicking(false); setError(""); setSavedFlash(false); setEditing(true);
+  };
+
+  useEffect(() => {
+    if (!editing || !draft) return undefined;
+    const u = draft.username, err = validateUsername(u);
+    if (err) { setUstate({ status: u ? "invalid" : "idle", msg: err }); return undefined; }
+    if (u === (profile.username || "")) { setUstate({ status: "same" }); return undefined; }
+    setUstate({ status: "checking" });
+    let alive = true;
+    const id = setTimeout(async () => { const r = await usernameApi.check(u, ownerKey); if (alive) setUstate({ status: r.status }); }, 450);
+    return () => { alive = false; clearTimeout(id); };
+  }, [draft?.username, editing, profile.username, ownerKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const changed = editing && draft && (draft.name.trim() !== profile.name || draft.username !== (profile.username || "") || JSON.stringify(draft.avatar) !== JSON.stringify(profile.avatar));
+  const canSave = Boolean(changed && draft.name.trim() && ["available", "same", "unverified"].includes(ustate.status) && !saving);
+
+  const save = async () => {
+    setSaving(true); setError("");
+    const res = await onSave({ name: draft.name, username: draft.username, avatar: draft.avatar });
+    setSaving(false);
+    if (!res.ok) {
+      if (res.error === "taken") { setUstate({ status: "taken" }); setError("That username was just taken. Try another."); }
+      else setError("Couldn't save your changes. Please try again.");
+      return;
+    }
+    setEditing(false); setSavedFlash(true); setTimeout(() => setSavedFlash(false), 2400);
+  };
+
+  const gridKey = (e) => {
+    const keys = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 };
+    if (!keys[e.key]) return;
+    const items = Array.from(e.currentTarget.querySelectorAll('[role="radio"]'));
+    const i = items.indexOf(document.activeElement);
+    if (i < 0) return;
+    e.preventDefault(); items[(i + keys[e.key] + items.length) % items.length].focus();
+  };
+
+  const def = view.avatar?.type === "orbis" ? ORBIS_AVATAR_MAP[view.avatar.id] : null;
+  const b = def ? def.c : ["#14123a", "#3b2a8f", "#9fb8ff", "#5b6cff"];
+  const card = { background: t.surface, border: `1px solid ${t.border}`, borderRadius: 18, ...GLASS };
+  const label = { display: "block", fontSize: 12, fontWeight: 600, color: t.textMuted, marginBottom: 6 };
+  const input = { width: "100%", boxSizing: "border-box", padding: "10px 12px", fontSize: 14, color: t.text, background: t.bg, border: `1px solid ${t.border}`, outline: "none" };
+  const st = ustate.status;
+  const msg = { idle: "3–20 characters · letters, numbers, underscores", invalid: ustate.msg, checking: "Checking availability…", available: `@${draft?.username} is available`, taken: `@${draft?.username} is already taken`, same: "This is your current username", unverified: `@${draft?.username} looks good` }[st];
+  const msgColor = st === "available" ? "#22a559" : st === "taken" ? "#e5484d" : t.textFaint;
+  const indicator = st === "checking" ? <span className="spinner" /> : st === "available" || st === "same" || st === "unverified" ? <Check size={16} strokeWidth={2.6} color="#22a559" /> : st === "taken" ? <X size={16} strokeWidth={2.6} color="#e5484d" /> : null;
+
+  return (
+    <div className="profile-page" style={{ maxWidth: 760, margin: "0 auto", display: "flex", flexDirection: "column", gap: 14 }}>
+      <section style={{ ...card, overflow: "hidden" }}>
+        <div style={{ height: 104, position: "relative", background: `linear-gradient(135deg, ${b[0]}, ${b[1]})`, transition: "background 500ms ease" }}>
+          <div aria-hidden="true" style={{ position: "absolute", inset: 0, backgroundImage: "radial-gradient(1px 1px at 20% 30%, rgba(255,255,255,.7), transparent), radial-gradient(1px 1px at 70% 20%, rgba(255,255,255,.6), transparent), radial-gradient(1.5px 1.5px at 85% 60%, rgba(255,255,255,.5), transparent), radial-gradient(1px 1px at 45% 75%, rgba(255,255,255,.5), transparent)" }} />
+          <div aria-hidden="true" style={{ position: "absolute", inset: 0, background: `radial-gradient(60% 130% at 82% 0%, ${b[2]}38, transparent)` }} />
+        </div>
+        <div style={{ display: "flex", alignItems: "flex-end", gap: 18, padding: "0 24px 22px", flexWrap: "wrap" }}>
+          <div key={`${view.avatar?.type}-${view.avatar?.id || view.avatar?.googleUrl}`} className="avatar-swap" style={{ marginTop: -48, borderRadius: "50%", boxShadow: `0 0 0 4px ${t.popover}`, lineHeight: 0 }}>
+            <Avatar avatar={view.avatar} name={view.name} size={96} />
+          </div>
+          <div style={{ flex: 1, minWidth: 180, paddingTop: 14 }}>
+            <h1 style={{ margin: 0, fontSize: 24, fontWeight: 700, letterSpacing: "-0.02em", color: t.text, lineHeight: 1.2, wordBreak: "break-word" }}>{view.name.trim() || "Your name"}</h1>
+            <div style={{ marginTop: 4, fontSize: 14, color: t.textMuted, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              {view.username ? <span>@{view.username}</span> : (
+                <button className="pf-chip" onClick={startEdit} style={{ color: t.textMuted }}>Choose a username</button>
+              )}
+              {savedFlash && <span className="pf-saved"><Check size={12} strokeWidth={3} /> Saved</span>}
+            </div>
+          </div>
+          {!editing && (
+            <button className="pf-btn pf-btn--ghost" onClick={startEdit} style={{ color: t.text, borderColor: t.border }}>
+              <Pencil size={14} /> Edit profile
+            </button>
+          )}
+        </div>
+      </section>
+
+      {editing && draft ? (
+        <section style={{ ...card, padding: 24, display: "flex", flexDirection: "column", gap: 20 }}>
+          <div>
+            <label htmlFor="pf-name" style={label}>Name</label>
+            <input id="pf-name" value={draft.name} maxLength={40} autoComplete="name" onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))} style={input} placeholder="Your name" />
+          </div>
+
+          <div>
+            <label htmlFor="pf-username" style={label}>Username</label>
+            <div style={{ position: "relative" }}>
+              <span aria-hidden="true" style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: t.textFaint, fontSize: 14 }}>@</span>
+              <input
+                id="pf-username" value={draft.username} autoCapitalize="none" autoCorrect="off" spellCheck={false} autoComplete="off"
+                aria-describedby="pf-username-msg" aria-invalid={st === "taken"} placeholder="username"
+                onChange={(e) => setDraft((d) => ({ ...d, username: normalizeUsername(e.target.value).slice(0, 24) }))}
+                style={{ ...input, paddingLeft: 28, paddingRight: 38, borderColor: st === "taken" ? "#e5484d" : t.border }}
+              />
+              <span style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", display: "flex" }}>{indicator}</span>
+            </div>
+            <div id="pf-username-msg" aria-live="polite" style={{ minHeight: 18, marginTop: 6, fontSize: 12, color: msgColor, transition: "color 200ms ease" }}>{msg}</div>
+          </div>
+
+          <div>
+            <span style={label}>Profile picture</span>
+            <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+              <Avatar avatar={draft.avatar} name={draft.name} size={56} />
+              <button className="pf-btn pf-btn--ghost" aria-expanded={picking} onClick={() => setPicking((p) => !p)} style={{ color: t.text, borderColor: t.border }}>
+                Change profile picture
+              </button>
+            </div>
+            {picking && (
+              <div className="pf-reveal" style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 12 }}>
+                <div role="radiogroup" aria-label="Profile picture source" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
+                  <button
+                    role="radio" aria-checked={source === "google"} disabled={google.status === "none"}
+                    className={`pf-source${source === "google" ? " is-selected" : ""}`}
+                    onClick={() => { if (!hasGoogle) return; setSource("google"); setDraft((d) => ({ ...d, avatar: { type: "google", googleUrl: google.url } })); }}
+                  >
+                    {google.status === "loading" ? <span className="skeleton" style={{ width: 36, height: 36, borderRadius: "50%" }} />
+                      : hasGoogle ? <Avatar avatar={{ type: "google", googleUrl: google.url }} name={draft.name} size={36} />
+                        : <span aria-hidden="true" style={{ width: 36, height: 36, borderRadius: "50%", background: "rgba(128,128,150,.2)", color: "#4285F4", fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center" }}>G</span>}
+                    <span style={{ textAlign: "left" }}>
+                      <span style={{ display: "block", fontSize: 13, fontWeight: 600, color: t.text }}>Use Google profile picture</span>
+                      <span style={{ display: "block", fontSize: 11, color: t.textFaint }}>{google.status === "none" ? "Available when you sign in with Google" : "From your Google account"}</span>
+                    </span>
+                  </button>
+                  <button role="radio" aria-checked={source === "orbis"} className={`pf-source${source === "orbis" ? " is-selected" : ""}`} onClick={() => setSource("orbis")}>
+                    <span aria-hidden="true" style={{ width: 36, height: 36, borderRadius: "50%", background: "rgba(128,128,150,.2)", display: "flex", alignItems: "center", justifyContent: "center", color: t.textMuted }}><Sparkles size={16} /></span>
+                    <span style={{ textAlign: "left" }}>
+                      <span style={{ display: "block", fontSize: 13, fontWeight: 600, color: t.text }}>Choose an Orbis avatar</span>
+                      <span style={{ display: "block", fontSize: 11, color: t.textFaint }}>{ORBIS_AVATARS.length} curated avatars</span>
+                    </span>
+                  </button>
+                </div>
+                {source === "orbis" && (
+                  <div role="radiogroup" aria-label="Orbis avatars" onKeyDown={gridKey} style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(64px, 1fr))", gap: 10 }}>
+                    {ORBIS_AVATARS.map((a) => {
+                      const sel = draft.avatar.type === "orbis" && draft.avatar.id === a.id;
+                      return (
+                        <button key={a.id} role="radio" aria-checked={sel} aria-label={a.name} title={a.name} className={`avatar-tile${sel ? " is-selected" : ""}`}
+                          onClick={() => setDraft((d) => ({ ...d, avatar: { type: "orbis", id: a.id } }))}>
+                          <Avatar avatar={{ type: "orbis", id: a.id }} name={a.name} size={52} />
+                          {sel && <span className="avatar-tile__check"><Check size={11} strokeWidth={3} /></span>}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {error && <div role="alert" style={{ fontSize: 13, color: "#e5484d", background: "rgba(229,72,77,.10)", border: "1px solid rgba(229,72,77,.28)", borderRadius: 10, padding: "9px 12px" }}>{error}</div>}
+          <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+            <button className="pf-btn pf-btn--ghost" onClick={() => setEditing(false)} disabled={saving} style={{ color: t.text, borderColor: t.border }}>Cancel</button>
+            <button className="pf-btn pf-btn--primary" onClick={save} disabled={!canSave}>
+              {saving ? <><span className="spinner spinner--light" /> Saving…</> : "Save changes"}
+            </button>
+          </div>
+        </section>
+      ) : (
+        <section style={{ ...card, padding: "8px 24px" }}>
+          <div style={{ fontSize: 12, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: t.textFaint, padding: "14px 0 6px" }}>Account</div>
+          {[
+            ["Email", auth.email || "Guest (local demo)"],
+            ["Sign-in", hasGoogle ? "Google" : isSupabaseConfigured && auth.email ? "Email & password" : "Local demo"],
+            ["Plan", planName],
+            ["Daily goal", `${profile.dailyGoalMinutes} min`],
+          ].map(([k, v], i, arr) => (
+            <div key={k} style={{ display: "flex", justifyContent: "space-between", gap: 16, padding: "13px 0", fontSize: 14, borderBottom: i < arr.length - 1 ? `1px solid ${t.border}` : "none" }}>
+              <span style={{ color: t.textMuted }}>{k}</span>
+              <span style={{ color: t.text, fontWeight: 500, textAlign: "right", wordBreak: "break-all" }}>{v}</span>
+            </div>
+          ))}
+        </section>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================================
+   BUTTON FX — a cursor-following sheen (drawn in CSS) and a springy press-and-release
+   on click. Nothing moves or tilts when the cursor merely approaches or hovers.
+   ============================================================================ */
+
+function ButtonFX() {
+  useEffect(() => {
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches) return undefined;
+    if (!matchMedia("(hover: hover) and (pointer: fine)").matches) return undefined;
+    // Cursor-following sheen position (CSS draws it). Buttons themselves never move toward the cursor.
+    const onMove = (e) => {
+      const b = e.target instanceof Element ? e.target.closest("button") : null;
+      if (!b || b.disabled) return;
+      const r = b.getBoundingClientRect();
+      b.style.setProperty("--bx", e.clientX - r.left + "px");
+      b.style.setProperty("--by", e.clientY - r.top + "px");
+    };
+    // Springy press-and-release on click only.
+    const onClick = (e) => {
+      const b = e.target instanceof Element ? e.target.closest("button") : null;
+      if (!b || b.disabled) return;
+      const low = b.getBoundingClientRect().width > 240 ? 0.985 : 0.93;
+      b.animate([{ scale: "1" }, { scale: String(low), offset: 0.25 }, { scale: "1.05", offset: 0.6 }, { scale: "1" }], { duration: 420, easing: "cubic-bezier(.34,1.56,.64,1)" });
+    };
+    document.addEventListener("pointermove", onMove, { passive: true });
+    document.addEventListener("click", onClick);
+    return () => {
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("click", onClick);
+    };
+  }, []);
+  return null;
+}
+
+/* ============================================================================
+   TILT FX — 3D tilt toward the cursor on the Plans & Billing cards only.
+   JS just sets --tilt-x/--tilt-y; App.css applies the perspective transform.
+   ============================================================================ */
+
+function TiltFX() {
+  useEffect(() => {
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches) return undefined;
+    if (!matchMedia("(hover: hover) and (pointer: fine)").matches) return undefined;
+    const MAX = 8;                                   // degrees
+    let cur = null, raf = 0, ev = null;
+    const reset = (c) => { if (c) { c.style.setProperty("--tilt-x", "0deg"); c.style.setProperty("--tilt-y", "0deg"); } };
+    const apply = () => {
+      raf = 0;
+      const card = ev.target instanceof Element ? ev.target.closest(".billing-plan-card") : null;
+      if (card !== cur) { reset(cur); cur = card; }
+      if (!card) return;
+      const r = card.getBoundingClientRect();
+      const px = (ev.clientX - r.left) / r.width - 0.5, py = (ev.clientY - r.top) / r.height - 0.5;
+      card.style.setProperty("--tilt-y", (px * MAX * 2).toFixed(2) + "deg");
+      card.style.setProperty("--tilt-x", (-py * MAX * 2).toFixed(2) + "deg");
+    };
+    const onMove = (e) => { ev = e; if (!raf) raf = requestAnimationFrame(apply); };
+    const onOut = () => { reset(cur); cur = null; };
+    document.addEventListener("pointermove", onMove, { passive: true });
+    document.documentElement.addEventListener("mouseleave", onOut);
+    return () => {
+      document.removeEventListener("pointermove", onMove);
+      document.documentElement.removeEventListener("mouseleave", onOut);
+      cancelAnimationFrame(raf); reset(cur);
+    };
+  }, []);
+  return null;
+}
+
+/* ============================================================================
+   LEADERBOARD — School / Class / Friends, ranked by the existing XP (profile.xp).
+   Cross-student data lives in a small public-profile table (see leaderboard.sql)
+   guarded by RLS, so a student only ever sees their own school, class and friends.
+   Email and other private fields are never stored there or returned.
+   ============================================================================ */
+
+const LB_SCOPES = [["school", "School"], ["class", "Class"], ["friends", "Friends"]];
+const LB_COLS = "user_id,username,name,avatar,xp,streak_current,streak_best,class_id";
+/* Deterministic order: XP, then best streak, then username, then id (so ties never reshuffle). */
+const lbCompare = (a, b) =>
+  (b.xp - a.xp) || ((b.streak_best || 0) - (a.streak_best || 0)) ||
+  String(a.username).localeCompare(String(b.username)) || String(a.user_id).localeCompare(String(b.user_id));
+const fmtNum = (n) => Number(n || 0).toLocaleString();
+
+const leaderboardApi = {
+  async uid() {
+    if (!isSupabaseConfigured) return null;
+    const { data: { session } } = await supabase.auth.getSession();
+    return session?.user?.id || null;
+  },
+  async sync(p) {
+    const { error } = await supabase.rpc("sl_sync", { p_username: p.username, p_name: p.name, p_avatar: p.avatar, p_xp: p.xp, p_streak: p.streak, p_best: p.best });
+    return !error;
+  },
+  async me(uid) {
+    const { data, error } = await supabase.from("studentos_leaderboard").select(`${LB_COLS},school_id`).eq("user_id", uid).maybeSingle();
+    return error ? null : data;
+  },
+  async scopeRows(scope, me) {
+    let q = supabase.from("studentos_leaderboard").select(LB_COLS).limit(500);
+    if (scope === "school") q = q.eq("school_id", me.school_id);
+    else if (scope === "class") q = q.eq("class_id", me.class_id);
+    else {
+      const { data: fr } = await supabase.from("studentos_friends").select("requester_id,addressee_id").eq("status", "accepted");
+      const ids = (fr || []).map((f) => (f.requester_id === me.user_id ? f.addressee_id : f.requester_id));
+      if (!ids.length) return [];
+      q = q.in("user_id", ids);
+    }
+    const { data, error } = await q;
+    if (error) throw error;
+    return data || [];
+  },
+  async classMap() {
+    const { data } = await supabase.from("studentos_classes").select("id,name");
+    return Object.fromEntries((data || []).map((c) => [c.id, c.name]));
+  },
+  async incoming() { const { data } = await supabase.rpc("sl_pending_requests"); return data || []; },
+  async searchIds(q) { const { data } = await supabase.rpc("sl_search_ids", { p_q: q }); return Array.isArray(data) ? data : []; },
+  async addFriend(uid, username) {
+    const { data, error } = await supabase.rpc("sl_find_user", { p_username: username });
+    if (error) return { ok: false, error: "Couldn't search right now." };
+    const found = (data || [])[0];
+    if (!found) return { ok: false, error: "No student with that username." };
+    const res = await supabase.from("studentos_friends").insert({ requester_id: uid, addressee_id: found.user_id });
+    if (res.error) return { ok: false, error: res.error.code === "23505" ? "Request already sent." : "Couldn't send the request." };
+    return { ok: true, name: found.name };
+  },
+  async respond(uid, requesterId, accept) {
+    const q = accept
+      ? supabase.from("studentos_friends").update({ status: "accepted" }).eq("requester_id", requesterId).eq("addressee_id", uid)
+      : supabase.from("studentos_friends").delete().eq("requester_id", requesterId).eq("addressee_id", uid);
+    const { error } = await q;
+    return !error;
+  },
+  async join(kind, code, studentId) {
+    const { error } = kind === "school"
+      ? await supabase.rpc("sl_join_school", { p_code: code.trim(), p_student_id: studentId.trim() || null })
+      : await supabase.rpc("sl_join_class", { p_code: code.trim() });
+    return error ? { ok: false, error: `That code didn't match a ${kind}.` } : { ok: true };
+  },
+};
+
+function useLeaderboard({ open, scope, snap, version }) {
+  const [s, setS] = useState({ status: "loading" });
+  const snapKey = JSON.stringify(snap);
+  useEffect(() => {
+    if (!open) return undefined;
+    let alive = true;
+    (async () => {
+      setS((p) => ({ ...p, status: "loading" }));
+      try {
+        if (!isSupabaseConfigured) { setS({ status: "offline" }); return; }
+        if (!snap.username) { setS({ status: "needsUsername" }); return; }
+        const uid = await leaderboardApi.uid();
+        if (!uid) { setS({ status: "offline" }); return; }
+        await leaderboardApi.sync(snap);
+        const me = await leaderboardApi.me(uid);
+        if (!me) { if (alive) setS({ status: "error" }); return; }
+        const [classMap, incoming] = await Promise.all([leaderboardApi.classMap(), leaderboardApi.incoming()]);
+        let gate = null, rows = [];
+        if (scope === "school" && !me.school_id) gate = "school";
+        else if (scope === "class" && !me.class_id) gate = me.school_id ? "class" : "school";
+        else rows = await leaderboardApi.scopeRows(scope, me);
+        if (!alive) return;
+        const mine = { ...me, name: snap.name, avatar: snap.avatar, xp: snap.xp, streak_current: snap.streak, streak_best: snap.best };
+        if (!gate) rows = [...rows.filter((r) => r.user_id !== uid), mine];
+        const ranked = rows.sort(lbCompare).map((r, i) => ({ ...r, rank: i + 1 }));
+        setS({ status: "ready", uid, me: mine, gate, rows: ranked, classMap, incoming });
+      } catch { if (alive) setS({ status: "error" }); }
+    })();
+    return () => { alive = false; };
+  }, [open, scope, snapKey, version]); // eslint-disable-line react-hooks/exhaustive-deps
+  return s;
+}
+
+function LbRow({ row, isMe, cls, t, refCb }) {
+  return (
+    <div ref={isMe ? refCb : undefined} className={`lb-row${isMe ? " is-me" : ""}`}>
+      <span className="lb-rank" style={{ color: t.textMuted }}>{row.rank}</span>
+      <Avatar avatar={row.avatar} name={row.name} size={38} />
+      <span className="lb-id">
+        <span className="lb-name" style={{ color: t.text }}>{row.name}{isMe && <span className="lb-you">You</span>}</span>
+        <span className="lb-sub" style={{ color: t.textFaint }}>@{row.username}{cls ? ` · ${cls}` : ""}</span>
+      </span>
+      <span className="lb-stats">
+        <span className="lb-xp" style={{ color: t.text }}>{fmtNum(row.xp)}<small style={{ color: t.textFaint }}> XP</small></span>
+        <span className="lb-streak" style={{ color: row.streak_current > 0 ? STREAK_ACCENT : t.textFaint }}><Flame size={12} /> {row.streak_current}</span>
+      </span>
+    </div>
+  );
+}
+
+function LbTop3({ rows, meId, t, refCb }) {
+  return (
+    <div className="lb-top3">
+      {[rows[1], rows[0], rows[2]].map((r) => (
+        <div key={r.user_id} ref={r.user_id === meId ? refCb : undefined} className={`lb-pod lb-pod--${r.rank}${r.user_id === meId ? " is-me" : ""}`}>
+          <span className="lb-pod__rank" style={{ color: t.textMuted }}>{r.rank}</span>
+          <Avatar avatar={r.avatar} name={r.name} size={r.rank === 1 ? 60 : 48} />
+          <span className="lb-pod__name" style={{ color: t.text }}>{r.name}</span>
+          <span className="lb-pod__xp" style={{ color: t.text }}>{fmtNum(r.xp)}<small style={{ color: t.textFaint }}> XP</small></span>
+          <span className="lb-streak" style={{ color: r.streak_current > 0 ? STREAK_ACCENT : t.textFaint }}><Flame size={12} /> {r.streak_current}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function LbEmpty({ icon: Icon, title, body, t, children }) {
+  return (
+    <div className="lb-empty">
+      <span className="lb-empty__icon" style={{ color: t.textMuted }}><Icon size={22} /></span>
+      <div style={{ fontSize: 15, fontWeight: 600, color: t.text }}>{title}</div>
+      {body && <div style={{ fontSize: 13, color: t.textMuted, maxWidth: 300, lineHeight: 1.5 }}>{body}</div>}
+      {children}
+    </div>
+  );
+}
+
+/* One-line input + button used for join codes and add-friend. */
+function LbInlineForm({ placeholder, extra, button, onSubmit, t }) {
+  const [v, setV] = useState(""), [v2, setV2] = useState(""), [busy, setBusy] = useState(false), [msg, setMsg] = useState(null);
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!v.trim() || busy) return;
+    setBusy(true); setMsg(null);
+    const r = await onSubmit(v, v2);
+    setBusy(false);
+    if (r.ok) { setV(""); setV2(""); if (r.message) setMsg({ ok: true, text: r.message }); } else setMsg({ ok: false, text: r.error });
+  };
+  const field = { flex: 1, minWidth: 0, boxSizing: "border-box", padding: "9px 12px", fontSize: 13, color: t.text, background: t.bg, border: `1px solid ${t.border}`, outline: "none" };
+  return (
+    <form onSubmit={submit} style={{ width: "100%", maxWidth: 360, display: "flex", flexDirection: "column", gap: 8 }}>
+      <div style={{ display: "flex", gap: 8 }}>
+        <input value={v} onChange={(e) => setV(e.target.value)} placeholder={placeholder} aria-label={placeholder} autoCapitalize="none" autoCorrect="off" spellCheck={false} style={field} />
+        <button type="submit" className="pf-btn pf-btn--primary" disabled={!v.trim() || busy}>{busy ? <span className="spinner spinner--light" /> : button}</button>
+      </div>
+      {extra && <input value={v2} onChange={(e) => setV2(e.target.value)} placeholder={extra} aria-label={extra} style={field} />}
+      <div aria-live="polite" style={{ minHeight: 16, fontSize: 12, color: msg ? (msg.ok ? "#22a559" : "#e5484d") : "transparent" }}>{msg?.text || "."}</div>
+    </form>
+  );
+}
+
+function LeaderboardPanel({ open, onClose, profile, streak, onOpenProfile, t }) {
+  const [scope, setScope] = useState("school");
+  const [q, setQ] = useState("");
+  const [version, setVersion] = useState(0);
+  const [idHits, setIdHits] = useState(() => new Set());
+  const [myEl, setMyEl] = useState(null);
+  const [myVisible, setMyVisible] = useState(false);
+  const scrollRef = useRef(null), panelRef = useRef(null);
+  const snap = useMemo(
+    () => ({ username: profile.username || "", name: profile.name, avatar: profile.avatar, xp: profile.xp, streak: streak.current, best: streak.longest }),
+    [profile.username, profile.name, profile.avatar, profile.xp, streak.current, streak.longest]
+  );
+  const data = useLeaderboard({ open, scope, snap, version });
+  const ready = data.status === "ready";
+  const rows = ready ? data.rows : [];
+  const needle = q.trim().toLowerCase().replace(/^@/, "");
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const key = (e) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", key);
+    panelRef.current?.focus();
+    return () => document.removeEventListener("keydown", key);
+  }, [open, onClose]);
+
+  useEffect(() => {
+    if (!ready || scope !== "school" || needle.length < 3) { setIdHits(new Set()); return undefined; }
+    let alive = true;
+    const id = setTimeout(async () => { const ids = await leaderboardApi.searchIds(needle); if (alive) setIdHits(new Set(ids)); }, 250);
+    return () => { alive = false; clearTimeout(id); };
+  }, [needle, scope, ready]);
+
+  useEffect(() => {
+    if (!myEl || !scrollRef.current) { setMyVisible(false); return undefined; }
+    const io = new IntersectionObserver(([en]) => setMyVisible(en.isIntersecting), { root: scrollRef.current, threshold: 0.6 });
+    io.observe(myEl);
+    return () => io.disconnect();
+  }, [myEl]);
+
+  if (!open) return null;
+  const results = needle ? rows.filter((r) => r.name.toLowerCase().includes(needle) || r.username.toLowerCase().includes(needle) || idHits.has(r.user_id)) : null;
+  const showPodium = !needle && rows.length >= 3;
+  const listRows = needle ? results : showPodium ? rows.slice(3) : rows;
+  const mine = ready ? rows.find((r) => r.user_id === data.uid) : null;
+  const idx = LB_SCOPES.findIndex(([k]) => k === scope);
+  const clsName = (r) => (ready && r.class_id ? data.classMap[r.class_id] : "");
+  const refresh = () => setVersion((v) => v + 1);
+
+  let body;
+  if (data.status === "loading") {
+    body = <div style={{ padding: "8px 4px" }}>{Array.from({ length: 6 }).map((_, i) => (
+      <div key={i} className="lb-row"><span className="skeleton" style={{ width: 18, height: 14, borderRadius: 6 }} /><span className="skeleton" style={{ width: 38, height: 38, borderRadius: "50%" }} /><span style={{ flex: 1, display: "flex", flexDirection: "column", gap: 6 }}><span className="skeleton" style={{ width: "45%", height: 12, borderRadius: 6 }} /><span className="skeleton" style={{ width: "28%", height: 10, borderRadius: 6 }} /></span><span className="skeleton" style={{ width: 52, height: 24, borderRadius: 6 }} /></div>
+    ))}</div>;
+  } else if (data.status === "offline") {
+    body = <LbEmpty icon={Trophy} t={t} title="Leaderboards need an account" body="Sign in with your Orbis account to see how you rank against your school, class and friends." />;
+  } else if (data.status === "needsUsername") {
+    body = <LbEmpty icon={Users} t={t} title="Choose a username first" body="Your @username is how classmates find you on the leaderboard."><button className="pf-btn pf-btn--primary" onClick={onOpenProfile}>Set up profile</button></LbEmpty>;
+  } else if (data.status === "error") {
+    body = <LbEmpty icon={AlertCircle} t={t} title="Couldn't load the leaderboard" body="Check your connection and try again."><button className="pf-btn pf-btn--ghost" style={{ color: t.text, borderColor: t.border }} onClick={refresh}>Try again</button></LbEmpty>;
+  } else if (data.gate) {
+    const school = data.gate === "school";
+    body = (
+      <LbEmpty icon={school ? GraduationCap : Users} t={t}
+        title={school ? "Join your school" : "No class joined yet"}
+        body={school ? "Enter the school code from your institution to see the school leaderboard." : "The class leaderboard is unavailable until you join a class. Enter your class code."}>
+        <LbInlineForm t={t} placeholder={school ? "School code" : "Class code"} extra={school ? "Student ID (optional)" : null} button="Join"
+          onSubmit={async (code, sid) => { const r = await leaderboardApi.join(school ? "school" : "class", code, sid || ""); if (r.ok) refresh(); return r; }} />
+      </LbEmpty>
+    );
+  } else {
+    body = (
+      <>
+        {scope === "friends" && (
+          <div className="lb-friends">
+            {data.incoming.length > 0 && (
+              <div style={{ marginBottom: 10 }}>
+                <div className="lb-label" style={{ color: t.textFaint }}>Friend requests</div>
+                {data.incoming.map((r) => (
+                  <div key={r.user_id} className="lb-row">
+                    <Avatar avatar={r.avatar} name={r.name} size={32} />
+                    <span className="lb-id"><span className="lb-name" style={{ color: t.text }}>{r.name}</span><span className="lb-sub" style={{ color: t.textFaint }}>@{r.username}</span></span>
+                    <button className="pf-btn pf-btn--primary" style={{ padding: "6px 12px" }} onClick={async () => { await leaderboardApi.respond(data.uid, r.user_id, true); refresh(); }}>Accept</button>
+                    <button className="pf-btn pf-btn--ghost" style={{ padding: "6px 12px", color: t.text, borderColor: t.border }} onClick={async () => { await leaderboardApi.respond(data.uid, r.user_id, false); refresh(); }}>Decline</button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="lb-label" style={{ color: t.textFaint }}>Add a friend</div>
+            <LbInlineForm t={t} placeholder="Their @username" button={<UserPlus size={15} />}
+              onSubmit={async (u) => { const r = await leaderboardApi.addFriend(data.uid, normalizeUsername(u)); return r.ok ? { ok: true, message: `Request sent to ${r.name}.` } : r; }} />
+          </div>
+        )}
+        {scope === "friends" && rows.length === 1 && !needle && (
+          <LbEmpty icon={Users} t={t} title="No friends yet" body="Add friends by username to compare XP and streaks." />
+        )}
+        {needle && results.length === 0 ? (
+          <LbEmpty icon={Search} t={t} title="No results" body={`Nothing matched “${q.trim()}” in this leaderboard.`} />
+        ) : (
+          <>
+            {showPodium && <LbTop3 rows={rows} meId={data.uid} t={t} refCb={setMyEl} />}
+            <div role="list" aria-label="Rankings">
+              {listRows.map((r) => <LbRow key={r.user_id} row={r} isMe={r.user_id === data.uid} cls={clsName(r)} t={t} refCb={setMyEl} />)}
+            </div>
+            {scope !== "friends" && rows.length === 1 && !needle && <div style={{ textAlign: "center", fontSize: 12, color: t.textFaint, padding: 18 }}>You're the first one here. Classmates will appear as they join.</div>}
+          </>
+        )}
+      </>
+    );
+  }
+
+  return (
+    <div className="lb-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <aside ref={panelRef} tabIndex={-1} className="lb-panel" data-nofx role="dialog" aria-modal="true" aria-label="Leaderboard"
+        style={{ background: t.popover, color: t.text, borderColor: t.border, backdropFilter: "blur(22px) saturate(1.2)", WebkitBackdropFilter: "blur(22px) saturate(1.2)" }}>
+        <header className="lb-head">
+          <div>
+            <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, letterSpacing: "-0.01em" }}>Leaderboard</h2>
+            <div style={{ fontSize: 12, color: t.textFaint, marginTop: 2 }}>Ranked by XP</div>
+          </div>
+          <button className="lb-close" onClick={onClose} aria-label="Close leaderboard" style={{ color: t.textMuted }}><X size={16} /></button>
+        </header>
+        <div className="lb-seg" role="tablist" aria-label="Leaderboard view" style={{ "--i": idx, borderColor: t.border }}>
+          <span className="lb-seg__thumb" aria-hidden="true" />
+          {LB_SCOPES.map(([k, label]) => (
+            <button key={k} role="tab" aria-selected={scope === k} className="lb-seg__btn" style={{ color: scope === k ? t.text : t.textMuted }} onClick={() => { setScope(k); setQ(""); }}>{label}</button>
+          ))}
+        </div>
+        <div className="lb-search" style={{ borderColor: t.border, background: t.bg }}>
+          <Search size={16} color={t.textFaint} />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by name, @username or student ID" aria-label="Search the leaderboard" spellCheck={false} style={{ color: t.text }} />
+          {q && <button className="lb-close" onClick={() => setQ("")} aria-label="Clear search" style={{ color: t.textMuted }}><X size={14} /></button>}
+        </div>
+        <div ref={scrollRef} className="lb-scroll">
+          <div key={`${scope}-${data.status}`} className="lb-body">{body}</div>
+        </div>
+        {ready && !data.gate && mine && !myVisible && (
+          <div className="lb-me" style={{ borderColor: t.border }}>
+            <div>
+              <div className="lb-label" style={{ color: t.textFaint, margin: 0 }}>Your rank</div>
+              <div style={{ fontSize: 22, fontWeight: 700, color: t.text, lineHeight: 1.1 }}>#{mine.rank}</div>
+            </div>
+            <Avatar avatar={mine.avatar} name={mine.name} size={34} />
+            <span style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", lineHeight: 1.3 }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: t.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{mine.name}</span>
+              <span style={{ fontSize: 12, color: STREAK_ACCENT, display: "inline-flex", alignItems: "center", gap: 4 }}><Flame size={12} /> {mine.streak_current} day streak</span>
+            </span>
+            <span style={{ fontSize: 15, fontWeight: 700, color: t.text }}>{fmtNum(mine.xp)}<small style={{ color: t.textFaint, fontWeight: 500 }}> XP</small></span>
+          </div>
+        )}
+      </aside>
+    </div>
+  );
 }
 
 export default function StudentOS() {
@@ -3482,6 +4524,9 @@ export default function StudentOS() {
   }, []);
 
   const t = THEMES[profile.theme] || THEMES.dark;
+  const sound = useThemeSound(profile.theme);
+  const google = useGoogleAvatar(auth.loggedIn);
+  const [lbOpen, setLbOpen] = useState(false);
   const activeEmail = (auth.email || "").trim().toLowerCase();
   const isOwner = Boolean(OWNER_EMAIL && activeEmail === OWNER_EMAIL);
   const currentMember = titleSystem.members[activeEmail] || EMPTY_MEMBER;
@@ -3530,6 +4575,19 @@ export default function StudentOS() {
       return next;
     });
   }, []);
+
+  const handleSaveProfile = useCallback(async ({ name, username, avatar }) => {
+    if (username !== (profile.username || "")) {
+      const claimed = await usernameApi.claim(username, auth.email || "guest", profile.username);
+      if (!claimed.ok) return claimed;
+    }
+    setProfile((previous) => {
+      const next = { ...previous, name: name.trim() || "Student", username, avatar };
+      db.saveProfile(next);
+      return next;
+    });
+    return { ok: true };
+  }, [auth.email, profile.username]);
 
   const handleSaveMember = useCallback(({ email, name, role: memberRole }) => {
     if (!isOwner || email === OWNER_EMAIL || !["student", "teacher", "admin"].includes(memberRole)) return;
@@ -3618,6 +4676,14 @@ export default function StudentOS() {
     [sessions, profile.dailyGoalMinutes]
   );
 
+  useEffect(() => {
+    if (!auth.loggedIn || !isSupabaseConfigured || !profile.username) return undefined;
+    const id = setTimeout(() => {
+      leaderboardApi.sync({ username: profile.username, name: profile.name, avatar: profile.avatar, xp: profile.xp, streak: streak.current, best: streak.longest });
+    }, 2000);
+    return () => clearTimeout(id);
+  }, [auth.loggedIn, profile.username, profile.name, profile.avatar, profile.xp, streak.current, streak.longest]);
+
   // Phase 4: award the daily-goal XP bonus once per calendar day, the first
   // time today's total study minutes crosses the goal.
   useEffect(() => {
@@ -3660,6 +4726,8 @@ export default function StudentOS() {
       <>
         {profile.theme === "dark" ? <SpaceBackground /> : <SkyBackground />}
         <CardFX theme={profile.theme} />
+        <ButtonFX />
+        <TiltFX />
         <LoginView onLogin={handleLogin} t={t} />
       </>
     );
@@ -3669,6 +4737,8 @@ export default function StudentOS() {
     <>
     {profile.theme === "dark" ? <SpaceBackground /> : <SkyBackground />}
         <CardFX theme={profile.theme} />
+        <ButtonFX />
+        <TiltFX />
     <div
       data-theme={profile.theme}
       style={{
@@ -3730,6 +4800,19 @@ export default function StudentOS() {
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <button
+            className="lb-trigger"
+            onClick={() => setLbOpen(true)}
+            aria-label="Open leaderboard"
+            title="Leaderboard"
+            style={{
+              width: 32, height: 32, borderRadius: 8, border: `1px solid ${t.border}`,
+              background: t.surface, color: t.textMuted, display: "flex",
+              alignItems: "center", justifyContent: "center", cursor: "pointer",
+            }}
+          >
+            <Trophy size={15} />
+          </button>
+          <button
             onClick={toggleTheme}
             aria-label="Toggle theme"
             style={{
@@ -3758,7 +4841,9 @@ export default function StudentOS() {
       <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
         {/* Side nav */}
         <div
+          data-nomag
           style={{
+            position: "relative", zIndex: 20,
             width: 176, borderRight: `1px solid ${t.border}`, padding: "16px 10px",
             background: t.chrome, ...GLASS_CHROME,
             display: "flex", flexDirection: "column", gap: 2, flexShrink: 0,
@@ -3770,6 +4855,10 @@ export default function StudentOS() {
             onSelect={setActiveTab}
             t={t}
           />
+          <SoundControl sound={sound} theme={profile.theme} t={t} />
+          <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${t.border}` }}>
+            <ProfileButton profile={profile} active={activeTab === "profile"} onClick={() => setActiveTab("profile")} t={t} />
+          </div>
         </div>
 
         {/* Main content */}
@@ -3836,6 +4925,15 @@ export default function StudentOS() {
               onCreateTitle={handleCreateTitle}
               onRemoveTitle={handleRemoveTitle}
               onUpdateProfileName={handleUpdateProfileName}
+              t={t}
+            />
+          ) : activeTab === "profile" ? (
+            <ProfileView
+              profile={profile}
+              auth={auth}
+              google={google}
+              planName={PLANS.find((p) => p.id === profile.plan)?.name || "Free"}
+              onSave={handleSaveProfile}
               t={t}
             />
           ) : activeTab === "subscription" ? (
@@ -3967,6 +5065,14 @@ export default function StudentOS() {
           )}
         </div>
       </div>
+      <LeaderboardPanel
+        open={lbOpen}
+        onClose={() => setLbOpen(false)}
+        profile={profile}
+        streak={streak}
+        onOpenProfile={() => { setLbOpen(false); setActiveTab("profile"); }}
+        t={t}
+      />
     </div>
     </>
   );
