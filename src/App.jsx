@@ -11,7 +11,7 @@ import {
   Search, X, Check, Building2, Bell, MapPin, FileText, Video, Link2,
   AlertCircle, Users, GraduationCap, PartyPopper, CreditCard, LogOut,
   Mail, Lock, Sparkles, ShieldCheck, Award, Play, Pause, RotateCcw,
-  Volume2, VolumeX, Settings, Cloud, Pencil, Trophy, UserPlus,
+  Volume2, VolumeX, Settings, Cloud, Pencil, Trophy, UserPlus, Menu,
 } from "lucide-react";
 
 /* ============================================================================
@@ -63,7 +63,7 @@ async function readStoredValue(key) {
         .eq("data_key", key)
         .maybeSingle();
       if (error) {
-        console.error("Could not load StudentOS data from Supabase", error);
+        console.error("Could not load Orbis data from Supabase", error);
         return null;
       }
       return data ? JSON.stringify(data.value) : null;
@@ -99,7 +99,7 @@ async function writeStoredValue(key, value) {
         { user_id: session.user.id, data_key: key, value: parsedValue },
         { onConflict: "user_id,data_key" }
       );
-      if (error) console.error("Could not save StudentOS data to Supabase", error);
+      if (error) console.error("Could not save Orbis data to Supabase", error);
       return;
     }
   }
@@ -642,7 +642,7 @@ const THEMES = {
     bg: "#0D0B14",
     surface: "rgba(14, 13, 24, 0.86)",
     surfaceRaised: "rgba(22, 21, 36, 0.90)",
-    chrome: "rgba(18, 16, 34, 0.38)",
+    chrome: "rgba(18, 16, 34, 0.52)",
     popover: "rgba(20, 18, 36, 0.92)",
     border: "rgba(120, 110, 170, 0.26)",
     text: "#F7F5FC",
@@ -653,12 +653,12 @@ const THEMES = {
     bg: "#F5F7FA",
     surface: "rgba(255, 255, 255, 0.64)",
     surfaceRaised: "rgba(244, 249, 255, 0.74)",
-    chrome: "rgba(255, 255, 255, 0.38)",
+    chrome: "rgba(255, 255, 255, 0.62)",
     popover: "rgba(255, 255, 255, 0.92)",
     border: "rgba(30, 90, 170, 0.24)",
     text: "#111827",
     textMuted: "#34445E",
-    textFaint: "#4A5972",
+    textFaint: "#41506A",
   },
 };
 
@@ -1007,6 +1007,7 @@ function SyllabusView({ topicStatus, onCycleTopic, subjectProgress, overallProgr
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search topics…"
+            aria-label="Search topics"
             style={{
               border: "none", outline: "none", background: "transparent",
               color: t.text, fontSize: 13, flex: 1, fontFamily: "inherit",
@@ -1015,6 +1016,7 @@ function SyllabusView({ topicStatus, onCycleTopic, subjectProgress, overallProgr
           {query && (
             <button
               onClick={() => setQuery("")}
+              aria-label="Clear search"
               style={{ border: "none", background: "transparent", cursor: "pointer", display: "flex" }}
             >
               <X size={13} color={t.textFaint} />
@@ -1023,7 +1025,7 @@ function SyllabusView({ topicStatus, onCycleTopic, subjectProgress, overallProgr
         </div>
 
         <select
-          value={subjectFilter}
+          value={subjectFilter} aria-label="Filter by subject"
           onChange={(e) => setSubjectFilter(e.target.value)}
           style={{
             background: t.surface, border: `1px solid ${t.border}`, borderRadius: 9,
@@ -1036,7 +1038,7 @@ function SyllabusView({ topicStatus, onCycleTopic, subjectProgress, overallProgr
         </select>
 
         <select
-          value={statusFilter}
+          value={statusFilter} aria-label="Filter by status"
           onChange={(e) => setStatusFilter(e.target.value)}
           style={{
             background: t.surface, border: `1px solid ${t.border}`, borderRadius: 9,
@@ -1108,6 +1110,13 @@ function TimerView({ onCompleteSession, todayMinutes, t }) {
   const [subjectId, setSubjectId] = useState("physics");
   const [topicId, setTopicId] = useState(ALL_TOPICS.find((topic) => topic.subjectId === "physics").id);
   const [status, setStatus] = useState("idle");
+  const [announce, setAnnounce] = useState("");
+  const prevStatus = useRef("idle");
+  useEffect(() => {
+    const p = prevStatus.current; prevStatus.current = status;
+    if (p === status) return;
+    setAnnounce(status === "running" ? (p === "paused" ? "Timer resumed" : "Timer started") : status === "paused" ? "Timer paused" : p !== "idle" ? "Timer stopped" : "");
+  }, [status]);
   const [phase, setPhase] = useState("focus");
   const [remaining, setRemaining] = useState(25 * 60);
   const [stopwatchSeconds, setStopwatchSeconds] = useState(0);
@@ -1243,6 +1252,7 @@ function TimerView({ onCompleteSession, todayMinutes, t }) {
         </span>
       </div>
 
+      <div className="sr-only" role="status" aria-live="polite">{announce}</div>
       <section className="timer-panel">
         <div className="timer-mode-switch" role="tablist" aria-label="Timer mode">
           {TIMER_MODES.map((timerMode) => (
@@ -1261,7 +1271,7 @@ function TimerView({ onCompleteSession, todayMinutes, t }) {
         </div>
 
         <div className="timer-workspace">
-          <div className="timer-dial" aria-label={`${formatClock(displaySeconds)} ${activeLabel}`}>
+          <div className="timer-dial" role="timer" aria-label={`${formatClock(displaySeconds)} ${activeLabel}`}>
             <svg viewBox="0 0 200 200" aria-hidden="true">
               <circle cx="100" cy="100" r="90" fill="none" stroke={t.border} strokeWidth="9" />
               <circle
@@ -1495,6 +1505,7 @@ function AddTaskForm({ onAdd, t }) {
     >
       <select
         value={subjectId}
+        aria-label="Subject"
         onChange={(e) => {
           setSubjectId(e.target.value);
           setTopicId(ALL_TOPICS.find((x) => x.subjectId === e.target.value).id);
@@ -1510,6 +1521,7 @@ function AddTaskForm({ onAdd, t }) {
       </select>
       <select
         value={topicId}
+        aria-label="Topic"
         onChange={(e) => setTopicId(e.target.value)}
         style={{
           flex: 1, minWidth: 160, background: t.surfaceRaised, border: `1px solid ${t.border}`, borderRadius: 9,
@@ -1521,7 +1533,7 @@ function AddTaskForm({ onAdd, t }) {
         ))}
       </select>
       <input
-        type="number" min={5} max={300} value={estMinutes}
+        type="number" inputMode="numeric" aria-label="Estimated minutes" min={5} max={300} value={estMinutes}
         onChange={(e) => setEstMinutes(e.target.value)}
         style={{
           width: 66, background: t.surfaceRaised, border: `1px solid ${t.border}`, borderRadius: 9,
@@ -1529,7 +1541,7 @@ function AddTaskForm({ onAdd, t }) {
         }}
       />
       <select
-        value={priority}
+        value={priority} aria-label="Priority"
         onChange={(e) => setPriority(e.target.value)}
         style={{
           background: t.surfaceRaised, border: `1px solid ${t.border}`, borderRadius: 9,
@@ -1573,7 +1585,7 @@ function PlanView({ tasks, onAddTask, onToggleTask, onDeleteTask, dailyGoalMinut
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span style={{ fontSize: 12, color: t.textMuted }}>Daily goal</span>
           <input
-            type="number" min={15} max={600} value={goalDraft}
+            type="number" inputMode="numeric" aria-label="Daily goal in minutes" min={15} max={600} value={goalDraft}
             onChange={(e) => setGoalDraft(e.target.value)}
             onBlur={() => onUpdateGoal(Math.max(15, Number(goalDraft) || 15))}
             style={{
@@ -2143,7 +2155,7 @@ function InstitutionMaterials({ t }) {
     <div>
       <div style={{ marginBottom: 12 }}>
         <select
-          value={subjectFilter}
+          value={subjectFilter} aria-label="Filter by subject"
           onChange={(e) => setSubjectFilter(e.target.value)}
           style={{
             background: t.surface, border: `1px solid ${t.border}`, borderRadius: 9,
@@ -2262,19 +2274,7 @@ function LoginView({ onLogin, t }) {
     >
       <div style={{ width: "100%", maxWidth: 360 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, justifyContent: "center", marginBottom: 24 }}>
-          <div
-            style={{
-              width: 34, height: 34, borderRadius: 9,
-              background: `linear-gradient(135deg, ${SUBJECTS.physics.color}, ${SUBJECTS.mathematics.color})`,
-              display: "flex", alignItems: "center", justifyContent: "center",
-              fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 16, color: "#0F1419",
-            }}
-          >
-            S
-          </div>
-          <span style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 19 }}>
-            StudentOS
-          </span>
+          <BrandMark size={34} wordSize={19} />
         </div>
 
         <div
@@ -2310,7 +2310,7 @@ function LoginView({ onLogin, t }) {
             >
               <Mail size={14} color={t.textFaint} />
               <input
-                type="email"
+                type="email" aria-label="Email address" autoComplete="email" inputMode="email" aria-invalid={Boolean(error)} aria-describedby={error ? "login-error" : undefined}
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -2328,7 +2328,7 @@ function LoginView({ onLogin, t }) {
             >
               <Lock size={14} color={t.textFaint} />
               <input
-                type="password"
+                type="password" aria-label="Password" autoComplete="current-password" aria-invalid={Boolean(error)} aria-describedby={error ? "login-error" : undefined}
                 required
                 minLength={6}
                 value={password}
@@ -2338,7 +2338,7 @@ function LoginView({ onLogin, t }) {
               />
             </div>
 
-            {error && <div role="alert" style={{ color: "#ff8585", fontSize: 12, marginBottom: 12 }}>{error}</div>}
+            {error && <div role="alert" id="login-error" style={{ color: t === THEMES.dark ? "#ff8585" : "#b42318", fontSize: 13, marginBottom: 12, display: "flex", gap: 6, alignItems: "flex-start" }}><AlertCircle size={14} style={{ flexShrink: 0, marginTop: 2 }} /><span>{error}</span></div>}
             {message && <div role="status" style={{ color: t.textMuted, fontSize: 12, marginBottom: 12 }}>{message}</div>}
 
             <button
@@ -2392,7 +2392,7 @@ const PLANS = [
     id: "free", name: "Free", portal: "student", prices: { month: 0, quarter: 0, year: 0 },
     tagline: "A strong foundation for your study routine.",
     features: [
-      "Core StudentOS Dashboard", "Syllabus & Subject Tracking", "Study Timer & Streaks",
+      "Core Orbis Dashboard", "Syllabus & Subject Tracking", "Study Timer & Streaks",
       "Basic Progress Tracking", "Test & Attendance Tracking", "Basic Analytics",
       "XP & Gamification", "Limited Customization",
     ],
@@ -2767,7 +2767,7 @@ function SpaceBackground({ style }) {
     const cv=canvasRef.current,ctx=cv.getContext('2d');
     const off=[],on=(el,ev,fn,o)=>{el.addEventListener(ev,fn,o);off.push(()=>el.removeEventListener(ev,fn,o))};
     let raf=0;
-    const reduce=matchMedia('(prefers-reduced-motion: reduce)').matches, amb=reduce?.25:1;
+    const reduce=matchMedia('(prefers-reduced-motion: reduce)').matches, amb=reduce?.25:1, lite=matchMedia('(max-width: 820px)').matches;
     const TAU=Math.PI*2, rnd=Math.random, randn=()=>(rnd()+rnd()+rnd()+rnd()-2)*1.2;
     let W,H,DPR,bg;
 
@@ -2814,10 +2814,10 @@ function SpaceBackground({ style }) {
       }
       g.putImageData(im,0,0);return c;
     }
-    const neb1=makeNebula(768,432,1.3,1,1),neb2=makeNebula(512,288,7.9,1.6,0);
+    const neb1=lite?makeNebula(448,252,1.3,1,1):makeNebula(768,432,1.3,1,1),neb2=lite?makeNebula(320,180,7.9,1.6,0):makeNebula(512,288,7.9,1.6,0);
 
     /* ---------- galaxy ---------- */
-    const GN=9500,NB=8;
+    const GN=lite?4200:9500,NB=8;
     const gr=new Float32Array(GN),gth=new Float32Array(GN),gz=new Float32Array(GN),gsz=new Float32Array(GN);
     const GC=['226,184,216','228,182,224','226,186,240','226,190,255','204,180,255','184,172,255','164,162,255','150,150,255'];
     const GA=[.12,.14,.18,.22,.27,.32,.36,.34];
@@ -2837,7 +2837,7 @@ function SpaceBackground({ style }) {
     })();
 
     /* ---------- stars ---------- */
-    const SN=3800,MN=110,TN=SN+MN;
+    const SN=lite?1800:3800,MN=lite?60:110,TN=SN+MN;
     const su=new Float32Array(TN),sv=new Float32Array(TN),sz=new Float32Array(TN),sph=new Float32Array(TN),ssz=new Float32Array(TN);
     const sox=new Float32Array(TN),soy=new Float32Array(TN),svx=new Float32Array(TN),svy=new Float32Array(TN);
     const scol=new Uint8Array(TN),big=new Uint8Array(TN);
@@ -2874,7 +2874,7 @@ function SpaceBackground({ style }) {
     on(document.documentElement,'pointerleave',()=>{act=false;nx=ny=0;press=0});
 
     function size(){
-      DPR=Math.min(devicePixelRatio||1,1.75);W=innerWidth;H=innerHeight;
+      DPR=Math.min(devicePixelRatio||1,lite?1.25:1.75);W=innerWidth;H=innerHeight;
       cv.width=W*DPR|0;cv.height=H*DPR|0;ctx.setTransform(DPR,0,0,DPR,0,0);
       bg=ctx.createRadialGradient(W*.6,H*.44,0,W*.6,H*.44,Math.max(W,H)*.8);
       bg.addColorStop(0,'#100b34');bg.addColorStop(.5,'#070620');bg.addColorStop(1,'#020210');
@@ -3036,6 +3036,7 @@ function SkyBackground() {
     const cv = canvasRef.current, ctx = cv.getContext("2d");
     const off = [], on = (el, ev, fn, o) => { el.addEventListener(ev, fn, o); off.push(() => el.removeEventListener(ev, fn, o)); };
     const amb = matchMedia("(prefers-reduced-motion: reduce)").matches ? 0.25 : 1;
+    const lite = matchMedia("(max-width: 820px)").matches;
     const rnd = Math.random;
     let W = 0, H = 0, bg, raf = 0, t = 0, last = 0;
 
@@ -3086,11 +3087,11 @@ function SkyBackground() {
     on(window, "pointerdown", () => { press = 1; });
     on(window, "pointerup", () => { press = 0; });
     on(document.documentElement, "pointerleave", () => { act = false; nx = ny = 0; press = 0; });
-    const specks = Array.from({ length: 70 }, () => ({ u: rnd(), v: rnd(), z: 0.2 + rnd() * 0.8, ph: rnd() * 6.28, ox: 0, oy: 0, vx: 0, vy: 0 }));
+    const specks = Array.from({ length: lite ? 30 : 70 }, () => ({ u: rnd(), v: rnd(), z: 0.2 + rnd() * 0.8, ph: rnd() * 6.28, ox: 0, oy: 0, vx: 0, vy: 0 }));
     let sweep = null, nextSweep = 6;
 
     function size() {
-      const dpr = Math.min(devicePixelRatio || 1, 1.75);
+      const dpr = Math.min(devicePixelRatio || 1, lite ? 1.25 : 1.75);
       W = innerWidth; H = innerHeight;
       cv.width = (W * dpr) | 0; cv.height = (H * dpr) | 0; ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       bg = ctx.createLinearGradient(0, 0, 0, H);
@@ -3518,11 +3519,13 @@ function useThemeSound(theme) {
 function SoundControl({ sound, theme, t }) {
   const [open, setOpen] = useState(false);
   const boxRef = useRef(null);
+  const settingsBtn = useRef(null);
   const on = sound.prefs.enabled;
   useEffect(() => {
     if (!open) return;
+    boxRef.current?.querySelector(".sound-pop button, .sound-pop input")?.focus({ preventScroll: true });
     const down = (e) => { if (boxRef.current && !boxRef.current.contains(e.target)) setOpen(false); };
-    const key = (e) => { if (e.key === "Escape") setOpen(false); };
+    const key = (e) => { if (e.key === "Escape") { setOpen(false); settingsBtn.current?.focus(); } };
     document.addEventListener("pointerdown", down); document.addEventListener("keydown", key);
     return () => { document.removeEventListener("pointerdown", down); document.removeEventListener("keydown", key); };
   }, [open]);
@@ -3585,7 +3588,7 @@ function SoundControl({ sound, theme, t }) {
         <span style={{ flex: 1 }}>Theme Sound</span>
         <span className={`sound-switch${on ? " is-on" : ""}`}><span className="sound-switch__knob" /></span>
       </button>
-      <button className="sound-row" onClick={() => setOpen((o) => !o)} aria-haspopup="dialog" aria-expanded={open} style={rowStyle(open)}>
+      <button ref={settingsBtn} className="sound-row" onClick={() => setOpen((o) => !o)} aria-haspopup="dialog" aria-expanded={open} style={rowStyle(open)}>
         <Settings size={15} strokeWidth={2.1} />
         <span style={{ flex: 1 }}>Settings</span>
       </button>
@@ -3754,7 +3757,7 @@ function ProfileButton({ profile, active, onClick, t }) {
   );
 }
 
-function ProfileView({ profile, auth, google, planName, onSave, t }) {
+function ProfileView({ profile, auth, google, planName, xp, streak, onSave, t }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(null);
   const [picking, setPicking] = useState(false);
@@ -3815,8 +3818,8 @@ function ProfileView({ profile, auth, google, planName, onSave, t }) {
   const input = { width: "100%", boxSizing: "border-box", padding: "10px 12px", fontSize: 14, color: t.text, background: t.bg, border: `1px solid ${t.border}`, outline: "none" };
   const st = ustate.status;
   const msg = { idle: "3–20 characters · letters, numbers, underscores", invalid: ustate.msg, checking: "Checking availability…", available: `@${draft?.username} is available`, taken: `@${draft?.username} is already taken`, same: "This is your current username", unverified: `@${draft?.username} looks good` }[st];
-  const msgColor = st === "available" ? "#22a559" : st === "taken" ? "#e5484d" : t.textFaint;
-  const indicator = st === "checking" ? <span className="spinner" /> : st === "available" || st === "same" || st === "unverified" ? <Check size={16} strokeWidth={2.6} color="#22a559" /> : st === "taken" ? <X size={16} strokeWidth={2.6} color="#e5484d" /> : null;
+  const msgColor = st === "available" ? "var(--ok)" : st === "taken" ? "var(--err)" : t.textFaint;
+  const indicator = st === "checking" ? <span className="spinner" /> : st === "available" || st === "same" || st === "unverified" ? <Check size={16} strokeWidth={2.6} color="var(--ok)" /> : st === "taken" ? <X size={16} strokeWidth={2.6} color="var(--err)" /> : null;
 
   return (
     <div className="profile-page" style={{ maxWidth: 760, margin: "0 auto", display: "flex", flexDirection: "column", gap: 14 }}>
@@ -3835,7 +3838,7 @@ function ProfileView({ profile, auth, google, planName, onSave, t }) {
               {view.username ? <span>@{view.username}</span> : (
                 <button className="pf-chip" onClick={startEdit} style={{ color: t.textMuted }}>Choose a username</button>
               )}
-              {savedFlash && <span className="pf-saved"><Check size={12} strokeWidth={3} /> Saved</span>}
+              {savedFlash && <span className="pf-saved" role="status"><Check size={12} strokeWidth={3} /> Saved</span>}
             </div>
           </div>
           {!editing && (
@@ -3861,7 +3864,7 @@ function ProfileView({ profile, auth, google, planName, onSave, t }) {
                 id="pf-username" value={draft.username} autoCapitalize="none" autoCorrect="off" spellCheck={false} autoComplete="off"
                 aria-describedby="pf-username-msg" aria-invalid={st === "taken"} placeholder="username"
                 onChange={(e) => setDraft((d) => ({ ...d, username: normalizeUsername(e.target.value).slice(0, 24) }))}
-                style={{ ...input, paddingLeft: 28, paddingRight: 38, borderColor: st === "taken" ? "#e5484d" : t.border }}
+                style={{ ...input, paddingLeft: 28, paddingRight: 38, borderColor: st === "taken" ? "var(--err)" : t.border }}
               />
               <span style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", display: "flex" }}>{indicator}</span>
             </div>
@@ -3918,7 +3921,7 @@ function ProfileView({ profile, auth, google, planName, onSave, t }) {
             )}
           </div>
 
-          {error && <div role="alert" style={{ fontSize: 13, color: "#e5484d", background: "rgba(229,72,77,.10)", border: "1px solid rgba(229,72,77,.28)", borderRadius: 10, padding: "9px 12px" }}>{error}</div>}
+          {error && <div role="alert" style={{ fontSize: 13, color: "var(--err)", background: "rgba(229,72,77,.10)", border: "1px solid rgba(229,72,77,.28)", borderRadius: 10, padding: "9px 12px" }}>{error}</div>}
           <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
             <button className="pf-btn pf-btn--ghost" onClick={() => setEditing(false)} disabled={saving} style={{ color: t.text, borderColor: t.border }}>Cancel</button>
             <button className="pf-btn pf-btn--primary" onClick={save} disabled={!canSave}>
@@ -3927,6 +3930,15 @@ function ProfileView({ profile, auth, google, planName, onSave, t }) {
           </div>
         </section>
       ) : (
+        <>
+          <div className="pf-stats-mobile">
+            {[["XP", fmtNum(xp), Zap, ACCENT], ["Streak", `${streak?.current ?? 0} day${(streak?.current ?? 0) === 1 ? "" : "s"}`, Flame, STREAK_ACCENT], ["Best streak", `${streak?.longest ?? 0}`, Award, ACCENT]].map(([k, v, Icon, c]) => (
+              <div key={k} style={{ ...card, padding: "12px 12px 13px", minWidth: 0 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: t.textFaint, marginBottom: 6 }}><Icon size={13} color={c} />{k}</div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: t.text, fontVariantNumeric: "tabular-nums", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{v}</div>
+              </div>
+            ))}
+          </div>
         <section style={{ ...card, padding: "8px 24px" }}>
           <div style={{ fontSize: 12, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: t.textFaint, padding: "14px 0 6px" }}>Account</div>
           {[
@@ -3941,6 +3953,7 @@ function ProfileView({ profile, auth, google, planName, onSave, t }) {
             </div>
           ))}
         </section>
+        </>
       )}
     </div>
   );
@@ -4184,7 +4197,7 @@ function LbInlineForm({ placeholder, extra, button, onSubmit, t }) {
         <button type="submit" className="pf-btn pf-btn--primary" disabled={!v.trim() || busy}>{busy ? <span className="spinner spinner--light" /> : button}</button>
       </div>
       {extra && <input value={v2} onChange={(e) => setV2(e.target.value)} placeholder={extra} aria-label={extra} style={field} />}
-      <div aria-live="polite" style={{ minHeight: 16, fontSize: 12, color: msg ? (msg.ok ? "#22a559" : "#e5484d") : "transparent" }}>{msg?.text || "."}</div>
+      <div aria-live="polite" style={{ minHeight: 16, fontSize: 12, color: msg ? (msg.ok ? "var(--ok)" : "var(--err)") : "transparent" }}>{msg?.text || "."}</div>
     </form>
   );
 }
@@ -4206,13 +4219,7 @@ function LeaderboardPanel({ open, onClose, profile, streak, onOpenProfile, t }) 
   const rows = ready ? data.rows : [];
   const needle = q.trim().toLowerCase().replace(/^@/, "");
 
-  useEffect(() => {
-    if (!open) return undefined;
-    const key = (e) => { if (e.key === "Escape") onClose(); };
-    document.addEventListener("keydown", key);
-    panelRef.current?.focus();
-    return () => document.removeEventListener("keydown", key);
-  }, [open, onClose]);
+  useDialogFocus(open, panelRef, onClose);
 
   useEffect(() => {
     if (!ready || scope !== "school" || needle.length < 3) { setIdHits(new Set()); return undefined; }
@@ -4318,11 +4325,12 @@ function LeaderboardPanel({ open, onClose, profile, streak, onOpenProfile, t }) 
         </div>
         <div className="lb-search" style={{ borderColor: t.border, background: t.bg }}>
           <Search size={16} color={t.textFaint} />
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by name, @username or student ID" aria-label="Search the leaderboard" spellCheck={false} style={{ color: t.text }} />
+          <input type="search" enterKeyHint="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by name, @username or student ID" aria-label="Search the leaderboard" spellCheck={false} style={{ color: t.text }} />
           {q && <button className="lb-close" onClick={() => setQ("")} aria-label="Clear search" style={{ color: t.textMuted }}><X size={14} /></button>}
         </div>
+        <div className="sr-only" role="status" aria-live="polite">{data.status === "loading" ? "Loading leaderboard" : needle && ready ? `${(results || []).length} result${(results || []).length === 1 ? "" : "s"}` : ""}</div>
         <div ref={scrollRef} className="lb-scroll">
-          <div key={`${scope}-${data.status}`} className="lb-body">{body}</div>
+          <div key={`${scope}-${data.status}`} className="lb-body" aria-busy={data.status === "loading"}>{body}</div>
         </div>
         {ready && !data.gate && mine && !myVisible && (
           <div className="lb-me" style={{ borderColor: t.border }}>
@@ -4343,7 +4351,202 @@ function LeaderboardPanel({ open, onClose, profile, streak, onOpenProfile, t }) 
   );
 }
 
-export default function StudentOS() {
+/* ============================================================================
+   ACCESSIBILITY HELPERS
+   useDialogFocus: focus moves into a dialog/sheet when it opens, Tab is kept inside,
+   Escape closes it, and focus returns to the control that opened it.
+   A11yFX: marks decorative SVG icons as hidden from screen readers.
+   ============================================================================ */
+
+const FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
+
+function useDialogFocus(open, ref, onClose) {
+  useEffect(() => {
+    if (!open) return undefined;
+    const opener = document.activeElement;
+    const node = ref.current;
+    const first = node?.querySelector(FOCUSABLE);
+    (first || node)?.focus?.({ preventScroll: true });
+    const key = (e) => {
+      if (e.key === "Escape") { e.stopPropagation(); onClose(); return; }
+      if (e.key !== "Tab" || !node) return;
+      const items = Array.from(node.querySelectorAll(FOCUSABLE)).filter((el) => el.offsetParent !== null);
+      if (!items.length) { e.preventDefault(); node.focus(); return; }
+      const f = items[0], l = items[items.length - 1], cur = document.activeElement;
+      if (e.shiftKey && (cur === f || cur === node)) { e.preventDefault(); l.focus(); }
+      else if (!e.shiftKey && cur === l) { e.preventDefault(); f.focus(); }
+    };
+    document.addEventListener("keydown", key);
+    return () => {
+      document.removeEventListener("keydown", key);
+      if (opener && opener.focus && document.contains(opener)) opener.focus({ preventScroll: true });
+    };
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+}
+
+function A11yFX() {
+  useEffect(() => {
+    let timer = 0;
+    const tag = () => {
+      document.querySelectorAll("svg:not([aria-hidden]):not([aria-label]):not([role])").forEach((n) => {
+        n.setAttribute("aria-hidden", "true"); n.setAttribute("focusable", "false");
+      });
+    };
+    tag();
+    const mo = new MutationObserver(() => { clearTimeout(timer); timer = setTimeout(tag, 200); });
+    mo.observe(document.body, { childList: true, subtree: true });
+    return () => { mo.disconnect(); clearTimeout(timer); };
+  }, []);
+  return null;
+}
+
+/* ============================================================================
+   BRAND + MOBILE SHELL — Orbis wordmark, compact header, bottom navigation and the
+   "More" sheet. On phones/tablets (<= 820px) the desktop sidebar is replaced by these.
+   ============================================================================ */
+
+function BrandMark({ size = 30, wordSize = 16, wordmark = true }) {
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
+      <span
+        aria-hidden="true"
+        style={{
+          width: size, height: size, borderRadius: Math.round(size * 0.27), flexShrink: 0,
+          background: `linear-gradient(135deg, ${SUBJECTS.physics.color}, ${SUBJECTS.mathematics.color})`,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: Math.round(size * 0.47), color: "#0F1419",
+        }}
+      >
+        O
+      </span>
+      {wordmark && <span style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: wordSize }}>Orbis</span>}
+    </span>
+  );
+}
+
+function useIsMobile(bp = 820) {
+  const q = `(max-width: ${bp}px)`;
+  const [m, setM] = useState(() => matchMedia(q).matches);
+  useEffect(() => {
+    const mq = matchMedia(q), on = () => setM(mq.matches);
+    on(); mq.addEventListener("change", on);
+    return () => mq.removeEventListener("change", on);
+  }, [q]);
+  return m;
+}
+
+function MobileHeader({ t, theme, onToggleTheme, onMenu }) {
+  return (
+    <header className="m-header" data-nomag style={{ background: t.chrome, borderColor: t.border, color: t.text }}>
+      <BrandMark size={28} wordSize={17} />
+      <span style={{ flex: 1 }} />
+      <button className="m-icon-btn" onClick={onToggleTheme} aria-label={theme === "dark" ? "Switch to day mode" : "Switch to night mode"} style={{ color: t.textMuted }}>
+        {theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}
+      </button>
+      <button className="m-icon-btn" onClick={onMenu} aria-label="Open menu" style={{ color: t.textMuted }}>
+        <Menu size={18} />
+      </button>
+    </header>
+  );
+}
+
+function MobileNav({ active, lbOpen, onSelect, onLeaderboard, profile, t }) {
+  const navRef = useRef(null);
+  useEffect(() => {
+    const el = navRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return undefined;
+    const set = () => document.documentElement.style.setProperty("--m-nav-h", `${el.offsetHeight}px`);
+    set();
+    const ro = new ResizeObserver(set); ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  useEffect(() => {
+    const field = "input:not([type=range]):not([type=checkbox]),textarea,select";
+    const on = (e) => {
+      if (!e.target.matches?.(field)) return;
+      document.documentElement.classList.add("kb-open");
+      const calm = matchMedia("(prefers-reduced-motion: reduce)").matches;
+      setTimeout(() => e.target.scrollIntoView?.({ block: "center", behavior: calm ? "auto" : "smooth" }), 320);
+    };
+    const off = () => document.documentElement.classList.remove("kb-open");
+    document.addEventListener("focusin", on); document.addEventListener("focusout", off);
+    return () => { document.removeEventListener("focusin", on); document.removeEventListener("focusout", off); off(); };
+  }, []);
+  const items = [
+    { id: "dashboard", label: "Home", icon: LayoutDashboard },
+    { id: "timer", label: "Focus", icon: TimerIcon },
+    { id: "syllabus", label: "Syllabus", icon: BookOpen },
+    { id: "leaderboard", label: "Leaderboard", icon: Trophy },
+    { id: "profile", label: "Profile" },
+  ];
+  return (
+    <nav ref={navRef} className="m-nav" aria-label="Main" data-nomag style={{ background: t.chrome, borderColor: t.border }}>
+      {items.map((it) => {
+        const isActive = it.id === "leaderboard" ? lbOpen : !lbOpen && active === it.id;
+        const Icon = it.icon;
+        return (
+          <button
+            key={it.id} className={`m-nav__item${isActive ? " is-active" : ""}`} aria-current={isActive ? "page" : undefined}
+            onClick={() => (it.id === "leaderboard" ? onLeaderboard() : onSelect(it.id))}
+            style={{ color: isActive ? t.text : t.textMuted }}
+          >
+            <span className="m-nav__icon">
+              {Icon ? <Icon size={19} strokeWidth={isActive ? 2.4 : 2} color={isActive ? ACCENT : undefined} />
+                : <Avatar avatar={profile.avatar} name={profile.name} size={22} style={{ boxShadow: isActive ? `0 0 0 2px ${ACCENT}` : undefined }} />}
+            </span>
+            <span>{it.label}</span>
+          </button>
+        );
+      })}
+    </nav>
+  );
+}
+
+function MobileMenuSheet({ open, onClose, items, activeTab, onSelect, theme, onToggleTheme, sound, onLogout, t }) {
+  const sheetRef = useRef(null);
+  useDialogFocus(open, sheetRef, onClose);
+  if (!open) return null;
+  const on = sound.prefs.enabled;
+  return (
+    <div className="m-sheet-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div ref={sheetRef} tabIndex={-1} className="m-sheet" data-nofx role="dialog" aria-modal="true" aria-label="Orbis menu"
+        style={{ background: t.popover, color: t.text, borderColor: t.border, backdropFilter: "blur(18px) saturate(1.2)", WebkitBackdropFilter: "blur(18px) saturate(1.2)" }}>
+        <div className="m-sheet__handle" aria-hidden="true" />
+        <div className="m-tiles">
+          {items.map((it) => {
+            const Icon = it.icon, active = activeTab === it.id;
+            return (
+              <button key={it.id} className={`m-tile${active ? " is-active" : ""}`} onClick={() => { onSelect(it.id); onClose(); }} style={{ color: active ? t.text : t.textMuted }}>
+                <Icon size={18} color={active ? ACCENT : undefined} /><span>{it.label}</span>
+              </button>
+            );
+          })}
+        </div>
+        <div className="m-rows">
+          <button className="m-row" onClick={onToggleTheme} style={{ color: t.text }}>
+            {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
+            <span style={{ flex: 1, textAlign: "left" }}>{theme === "dark" ? "Switch to Day" : "Switch to Night"}</span>
+          </button>
+          <button className="m-row" role="switch" aria-checked={on} onClick={() => sound.setEnabled(!on)} style={{ color: t.text }}>
+            {on ? <Volume2 size={18} /> : <VolumeX size={18} />}
+            <span style={{ flex: 1, textAlign: "left" }}>Theme Sound</span>
+            <span className={`sound-switch${on ? " is-on" : ""}`}><span className="sound-switch__knob" /></span>
+          </button>
+          <div className="m-row m-row--static" style={{ color: t.textMuted, opacity: on ? 1 : 0.5 }}>
+            <span style={{ fontSize: 13, width: 56 }}>Volume</span>
+            <input className="sound-range" type="range" min="0" max="100" aria-label="Volume" value={Math.round(sound.prefs.volume * 100)}
+              onChange={(e) => sound.setVolume(Number(e.target.value) / 100)} style={{ "--fill": `${Math.round(sound.prefs.volume * 100)}%` }} />
+          </div>
+          <button className="m-row" onClick={() => { onClose(); onLogout(); }} style={{ color: "var(--err)" }}>
+            <LogOut size={18} /><span style={{ flex: 1, textAlign: "left" }}>Sign out</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function Orbis() {
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState(DEFAULT_PROFILE);
   const [topicStatus, setTopicStatus] = useState({});
@@ -4527,6 +4730,21 @@ export default function StudentOS() {
   const sound = useThemeSound(profile.theme);
   const google = useGoogleAvatar(auth.loggedIn);
   const [lbOpen, setLbOpen] = useState(false);
+  const isMobile = useIsMobile();
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  // Browser tab title, installed-app name and mobile status-bar colour all say Orbis.
+  useEffect(() => {
+    document.title = "Orbis";
+    const setMeta = (name, content) => {
+      let m = document.querySelector(`meta[name="${name}"]`);
+      if (!m) { m = document.createElement("meta"); m.name = name; document.head.appendChild(m); }
+      m.content = content;
+    };
+    setMeta("application-name", "Orbis");
+    setMeta("apple-mobile-web-app-title", "Orbis");
+    setMeta("theme-color", profile.theme === "dark" ? "#070620" : "#3aa6ff");
+  }, [profile.theme]);
   const activeEmail = (auth.email || "").trim().toLowerCase();
   const isOwner = Boolean(OWNER_EMAIL && activeEmail === OWNER_EMAIL);
   const currentMember = titleSystem.members[activeEmail] || EMPTY_MEMBER;
@@ -4716,7 +4934,7 @@ export default function StudentOS() {
         display: "flex", alignItems: "center", justifyContent: "center",
         fontFamily: "Inter, system-ui, sans-serif", fontSize: 13.5,
       }}>
-        Loading StudentOS…
+        Loading Orbis…
       </div>
     );
   }
@@ -4728,6 +4946,7 @@ export default function StudentOS() {
         <CardFX theme={profile.theme} />
         <ButtonFX />
         <TiltFX />
+        <A11yFX />
         <LoginView onLogin={handleLogin} t={t} />
       </>
     );
@@ -4739,6 +4958,7 @@ export default function StudentOS() {
         <CardFX theme={profile.theme} />
         <ButtonFX />
         <TiltFX />
+        <A11yFX />
     <div
       data-theme={profile.theme}
       style={{
@@ -4756,6 +4976,9 @@ export default function StudentOS() {
       }}
     >
       {/* Top bar */}
+      {isMobile ? (
+        <MobileHeader t={t} theme={profile.theme} onToggleTheme={toggleTheme} onMenu={() => setMenuOpen(true)} />
+      ) : (
       <div
         style={{
           display: "flex", alignItems: "center", justifyContent: "space-between",
@@ -4764,19 +4987,7 @@ export default function StudentOS() {
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div
-            style={{
-              width: 30, height: 30, borderRadius: 8,
-              background: `linear-gradient(135deg, ${SUBJECTS.physics.color}, ${SUBJECTS.mathematics.color})`,
-              display: "flex", alignItems: "center", justifyContent: "center",
-              fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 14, color: "#0F1419",
-            }}
-          >
-            S
-          </div>
-          <span style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 16 }}>
-            StudentOS
-          </span>
+          <BrandMark size={30} wordSize={16} />
           <span
             style={{
               fontSize: 11, fontWeight: 600, letterSpacing: "0.04em",
@@ -4792,7 +5003,7 @@ export default function StudentOS() {
               fontSize: 11, fontWeight: 700, letterSpacing: "0.02em",
               padding: "3px 9px", borderRadius: 999, border: "none", cursor: "pointer",
               background: profile.plan === "free" ? t.surfaceRaised : `${ACCENT}1A`,
-              color: profile.plan === "free" ? t.textMuted : ACCENT,
+              color: profile.plan === "free" ? t.textMuted : "var(--accent-text, #ff5e3a)",
             }}
           >
             {PLANS.find((p) => p.id === profile.plan)?.name || "Free"} plan
@@ -4837,9 +5048,11 @@ export default function StudentOS() {
           </button>
         </div>
       </div>
+      )}
 
       <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
-        {/* Side nav */}
+        {/* Side nav (desktop only) */}
+        {!isMobile && (
         <div
           data-nomag
           style={{
@@ -4860,12 +5073,15 @@ export default function StudentOS() {
             <ProfileButton profile={profile} active={activeTab === "profile"} onClick={() => setActiveTab("profile")} t={t} />
           </div>
         </div>
+        )}
 
         {/* Main content */}
         <div
-          className={activeTab === "dashboard" ? "dashboard-view" : undefined}
+          className={[activeTab === "dashboard" ? "dashboard-view" : "", isMobile ? "m-content" : ""].filter(Boolean).join(" ") || undefined}
           data-theme={profile.theme}
-          style={{ flex: 1, padding: "22px 24px", overflowY: "auto" }}
+          style={isMobile
+            ? { flex: 1, minWidth: 0, padding: "calc(66px + env(safe-area-inset-top, 0px)) 14px calc(var(--m-nav-h, 72px) + 20px)" }
+            : { flex: 1, padding: "22px 24px", overflowY: "auto" }}
         >
           {activeTab === "institution" ? (
             <InstitutionView
@@ -4933,6 +5149,8 @@ export default function StudentOS() {
               auth={auth}
               google={google}
               planName={PLANS.find((p) => p.id === profile.plan)?.name || "Free"}
+              xp={profile.xp}
+              streak={streak}
               onSave={handleSaveProfile}
               t={t}
             />
@@ -5065,6 +5283,13 @@ export default function StudentOS() {
           )}
         </div>
       </div>
+      {isMobile && (
+        <>
+          <MobileNav active={activeTab} lbOpen={lbOpen} onSelect={(id) => { setLbOpen(false); setActiveTab(id); }} onLeaderboard={() => setLbOpen(true)} profile={profile} t={t} />
+          <MobileMenuSheet open={menuOpen} onClose={() => setMenuOpen(false)} items={NAV_ITEMS} activeTab={activeTab}
+            onSelect={(id) => { setLbOpen(false); setActiveTab(id); }} theme={profile.theme} onToggleTheme={toggleTheme} sound={sound} onLogout={handleLogout} t={t} />
+        </>
+      )}
       <LeaderboardPanel
         open={lbOpen}
         onClose={() => setLbOpen(false)}
