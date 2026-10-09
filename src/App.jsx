@@ -46,7 +46,7 @@ const DEFAULT_PROFILE = {
   planDuration: "month",
 };
 
-const DEFAULT_AUTH = { loggedIn: false, email: null };
+const DEFAULT_AUTH = { loggedIn: false, email: null, userId: null };
 const DEFAULT_TITLE_SYSTEM = { members: {}, customTitles: [], overrides: {} };
 const EMPTY_MEMBER = { grantedTitleIds: [] };
 const OWNER_EMAIL = (import.meta.env.VITE_STUDENTOS_OWNER_EMAIL || "").trim().toLowerCase();
@@ -187,6 +187,7 @@ const db = {
       return {
         loggedIn: Boolean(data.session),
         email: data.session?.user?.email || null,
+        userId: data.session?.user?.id || null,
       };
     }
     return readStoredJson(STORAGE_KEYS.auth, DEFAULT_AUTH);
@@ -631,6 +632,73 @@ function formatClock(totalSeconds) {
   const m = Math.floor(s / 60);
   const rem = s % 60;
   return `${pad2(m)}:${pad2(rem)}`;
+}
+
+function focusMetadataKey(userId) {
+  return `studentos:focus-session:${userId}`;
+}
+
+function readFocusMetadata(userId) {
+  if (!userId || typeof window === "undefined") return null;
+  try {
+    const value = window.localStorage.getItem(focusMetadataKey(userId));
+    return value ? JSON.parse(value) : null;
+  } catch (error) {
+    console.error("Could not read saved Focus recovery metadata", error);
+    return null;
+  }
+}
+
+function writeFocusMetadata(userId, metadata) {
+  if (!userId || typeof window === "undefined") return false;
+  try {
+    window.localStorage.setItem(focusMetadataKey(userId), JSON.stringify({
+      version: 1,
+      userId,
+      ...metadata,
+      savedAt: new Date().toISOString(),
+    }));
+    return true;
+  } catch (error) {
+    console.error("Could not save Focus recovery metadata", error);
+    return false;
+  }
+}
+
+function clearFocusMetadata(userId) {
+  if (!userId || typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(focusMetadataKey(userId));
+  } catch (error) {
+    console.error("Could not clear Focus recovery metadata", error);
+  }
+}
+
+function isValidFocusMetadata(metadata, userId) {
+  if (!metadata || metadata.version !== 1 || metadata.userId !== userId) return false;
+  if (!TIMER_MODES.some((timerMode) => timerMode.id === metadata.mode)) return false;
+  if (!TIMER_PRESETS.some((preset) => preset.id === metadata.presetId)) return false;
+  if (!SUBJECTS[metadata.subjectId]) return false;
+  if (!ALL_TOPICS.some((topic) =>
+    topic.id === metadata.topicId && topic.subjectId === metadata.subjectId
+  )) return false;
+  if (!Number.isFinite(metadata.focusSeconds) || metadata.focusSeconds < 60 || metadata.focusSeconds > 10800) return false;
+  if (!Number.isFinite(metadata.breakSeconds) || metadata.breakSeconds < 60 || metadata.breakSeconds > 3600) return false;
+  if (!Number.isInteger(metadata.customMinutes) || metadata.customMinutes < 1 || metadata.customMinutes > 180) return false;
+  if (!Number.isInteger(metadata.customBreakMinutes) || metadata.customBreakMinutes < 1 || metadata.customBreakMinutes > 60) return false;
+  const preset = TIMER_PRESETS.find((item) => item.id === metadata.presetId);
+  if (metadata.focusSeconds !== (preset.focusMin ?? metadata.customMinutes) * 60) return false;
+  if (metadata.breakSeconds !== (preset.breakMin ?? metadata.customBreakMinutes) * 60) return false;
+  const maxRemaining = metadata.phase === "break" ? metadata.breakSeconds : metadata.focusSeconds;
+  if (!Number.isFinite(metadata.remaining) || metadata.remaining < 0 || metadata.remaining > maxRemaining) return false;
+  if (!Number.isFinite(metadata.stopwatchSeconds) || metadata.stopwatchSeconds < 0) return false;
+  if (!["focus", "break"].includes(metadata.phase)) return false;
+  if (metadata.phase === "break" && metadata.mode !== "pomodoro") return false;
+  if (!["running", "paused"].includes(metadata.status)) return false;
+  if (!Number.isFinite(new Date(metadata.savedAt).getTime())) return false;
+  if (metadata.sessionMode === "server" && typeof metadata.serverSessionId !== "string") return false;
+  if (metadata.sessionMode === "pomodoro-break" && metadata.serverSessionId != null) return false;
+  return true;
 }
 
 /* ============================================================================
@@ -1102,7 +1170,17 @@ const TIMER_MODES = [
   { id: "stopwatch", label: "Stopwatch" },
 ];
 
-function TimerView({ onCompleteSession, todayMinutes, t }) {
+function TimerView({
+  authenticatedUserId,
+  onRecoverSession,
+  onStartSession,
+  onPauseSession,
+  onResumeSession,
+  onCancelSession,
+  onCompleteSession,
+  todayMinutes,
+  t,
+}) {
   const [mode, setMode] = useState("timer");
   const [presetId, setPresetId] = useState("25-5");
   const [customMinutes, setCustomMinutes] = useState(30);
@@ -1111,7 +1189,18 @@ function TimerView({ onCompleteSession, todayMinutes, t }) {
   const [topicId, setTopicId] = useState(ALL_TOPICS.find((topic) => topic.subjectId === "physics").id);
   const [status, setStatus] = useState("idle");
   const [announce, setAnnounce] = useState("");
+  const [timerError, setTimerError] = useState("");
+  const [actionPending, setActionPending] = useState(false);
+  const [recoveryStatus, setRecoveryStatus] = useState("checking");
+  const [recoveryAttempt, setRecoveryAttempt] = useState(0);
+  const [recoveryChoice, setRecoveryChoice] = useState(null);
+  const [recoveryError, setRecoveryError] = useState("");
   const prevStatus = useRef("idle");
+  const timerSessionRef = useRef(null);
+  const segmentStartedAtRef = useRef(null);
+  const actionInFlightRef = useRef(false);
+  const userIdRef = useRef(authenticatedUserId || null);
+  const recoverySessionRef = useRef(null);
   useEffect(() => {
     const p = prevStatus.current; prevStatus.current = status;
     if (p === status) return;
@@ -1130,6 +1219,7 @@ function TimerView({ onCompleteSession, todayMinutes, t }) {
   const idle = status === "idle";
   const running = status === "running";
   const paused = status === "paused";
+  const timerLocked = recoveryStatus !== "ready" || actionPending;
   const segmentSeconds = mode === "pomodoro" && phase === "break" ? breakSeconds : focusSeconds;
   const elapsedSeconds = mode === "stopwatch" ? stopwatchSeconds : segmentSeconds - remaining;
   const displaySeconds = mode === "stopwatch" ? stopwatchSeconds : remaining;
@@ -1138,23 +1228,437 @@ function TimerView({ onCompleteSession, todayMinutes, t }) {
     : segmentSeconds > 0 ? Math.max(0, Math.min(1, elapsedSeconds / segmentSeconds)) : 0;
   const circumference = 2 * Math.PI * 90;
 
-  const saveSession = useCallback((durationSec) => {
-    if (durationSec < 60) return;
-    const endedAt = new Date();
-    onCompleteSession({
-      id: `session-${Date.now()}`,
-      subjectId,
-      topicId,
-      durationSec,
-      startedAt: new Date(endedAt.getTime() - durationSec * 1000).toISOString(),
-      endedAt: endedAt.toISOString(),
-      xpEarned: computeSessionXp(durationSec),
+  const currentMetadata = useCallback((nextStatus = status, overrides = {}) => ({
+    sessionMode: timerSessionRef.current?.kind === "server"
+      ? "server"
+      : mode === "pomodoro" && phase === "break" ? "pomodoro-break" : null,
+    serverSessionId: timerSessionRef.current?.serverSessionId || null,
+    mode,
+    presetId,
+    customMinutes,
+    customBreakMinutes,
+    subjectId,
+    topicId,
+    phase,
+    focusSeconds,
+    breakSeconds,
+    remaining,
+    stopwatchSeconds,
+    status: nextStatus,
+    ...overrides,
+  }), [
+    breakSeconds,
+    customBreakMinutes,
+    customMinutes,
+    focusSeconds,
+    mode,
+    phase,
+    presetId,
+    remaining,
+    status,
+    stopwatchSeconds,
+    subjectId,
+    topicId,
+  ]);
+
+  const restoreServerSession = useCallback((metadata, timerSession, elapsedSeconds, isRunning, useDefaults = false) => {
+    const nextMetadata = useDefaults ? null : metadata;
+    const nextMode = nextMetadata?.mode || "stopwatch";
+    const nextSubjectId = nextMetadata?.subjectId || "physics";
+    const nextTopicId = nextMetadata?.topicId || ALL_TOPICS.find((topic) => topic.subjectId === nextSubjectId).id;
+    const nextFocusSeconds = nextMetadata?.focusSeconds || 25 * 60;
+    const nextBreakSeconds = nextMetadata?.breakSeconds || 5 * 60;
+    const nextCustomMinutes = nextMetadata?.customMinutes || 30;
+    const nextCustomBreakMinutes = nextMetadata?.customBreakMinutes || 5;
+    const nextPresetId = TIMER_PRESETS.some((preset) => preset.id === nextMetadata?.presetId)
+      ? nextMetadata.presetId
+      : "25-5";
+    timerSessionRef.current = timerSession;
+    recoverySessionRef.current = timerSession;
+    segmentStartedAtRef.current = timerSession.startedAt;
+    userIdRef.current = timerSession.userId;
+    setMode(nextMode);
+    setPresetId(nextPresetId);
+    setCustomMinutes(nextCustomMinutes);
+    setCustomBreakMinutes(nextCustomBreakMinutes);
+    setSubjectId(nextSubjectId);
+    setTopicId(nextTopicId);
+    setPhase("focus");
+    setRemaining(Math.max(0, nextFocusSeconds - elapsedSeconds));
+    setStopwatchSeconds(elapsedSeconds);
+    setStatus(isRunning ? "running" : "paused");
+    setRecoveryChoice(null);
+    setRecoveryError("");
+    setRecoveryStatus("ready");
+    writeFocusMetadata(timerSession.userId, {
+      sessionMode: "server",
+      serverSessionId: timerSession.serverSessionId,
+      mode: nextMode,
+      presetId: nextPresetId,
+      customMinutes: nextCustomMinutes,
+      customBreakMinutes: nextCustomBreakMinutes,
+      subjectId: nextSubjectId,
+      topicId: nextTopicId,
+      phase: "focus",
+      focusSeconds: nextFocusSeconds,
+      breakSeconds: nextBreakSeconds,
+      remaining: Math.max(0, nextFocusSeconds - elapsedSeconds),
+      stopwatchSeconds: elapsedSeconds,
+      status: isRunning ? "running" : "paused",
     });
-    setJustSaved(true);
-  }, [onCompleteSession, subjectId, topicId]);
+  }, []);
 
   useEffect(() => {
-    if (status !== "running") return undefined;
+    let alive = true;
+    userIdRef.current = authenticatedUserId || null;
+
+    (async () => {
+      try {
+        const result = await onRecoverSession();
+        if (!alive) return;
+        if (result.kind === "local") {
+          userIdRef.current = null;
+          setRecoveryStatus("ready");
+          return;
+        }
+
+        const { userId, activeSession } = result;
+        userIdRef.current = userId;
+        const metadata = readFocusMetadata(userId);
+        if (activeSession) {
+          const timerSession = {
+            kind: "server",
+            serverSessionId: activeSession.session_id,
+            userId,
+            startedAt: activeSession.started_at,
+          };
+          const accumulated = Number(activeSession.accumulated_seconds);
+          const activeStart = activeSession.active_started_at
+            ? new Date(activeSession.active_started_at).getTime()
+            : null;
+          const activeElapsed = activeStart == null ? 0 : Math.floor((Date.now() - activeStart) / 1000);
+          const elapsedSeconds = accumulated + activeElapsed;
+          if (!Number.isFinite(accumulated) || accumulated < 0
+            || (activeStart != null && !Number.isFinite(activeStart))
+            || !Number.isFinite(elapsedSeconds) || elapsedSeconds < 0) {
+            setRecoveryChoice({
+              type: "active",
+              session: timerSession,
+              elapsedSeconds: 0,
+              isRunning: activeSession.active_started_at != null,
+              reason: "The server returned invalid elapsed-time data.",
+            });
+            setRecoveryStatus("choice");
+            return;
+          }
+
+          const matches = isValidFocusMetadata(metadata, userId)
+            && metadata.sessionMode === "server"
+            && metadata.serverSessionId === activeSession.session_id
+            && metadata.phase === "focus";
+          if (matches) {
+            restoreServerSession(
+              metadata,
+              timerSession,
+              elapsedSeconds,
+              activeSession.active_started_at != null
+            );
+          } else {
+            setRecoveryChoice({
+              type: "active",
+              session: timerSession,
+              elapsedSeconds,
+              isRunning: activeSession.active_started_at != null,
+              reason: metadata
+                ? "Saved timer details do not match the active server session."
+                : "The active server session was found, but its timer details are missing.",
+            });
+            setRecoveryStatus("choice");
+          }
+          return;
+        }
+
+        recoverySessionRef.current = null;
+        timerSessionRef.current = null;
+        if (metadata?.sessionMode === "pomodoro-break"
+          && metadata.serverSessionId == null
+          && metadata.mode === "pomodoro"
+          && metadata.phase === "break"
+          && isValidFocusMetadata(metadata, userId)) {
+          const savedAt = new Date(metadata.savedAt).getTime();
+          const breakElapsed = metadata.status === "running" && Number.isFinite(savedAt)
+            ? Math.max(0, Math.floor((Date.now() - savedAt) / 1000))
+            : 0;
+          setMode("pomodoro");
+          setPresetId(TIMER_PRESETS.some((preset) => preset.id === metadata.presetId) ? metadata.presetId : "25-5");
+          setCustomMinutes(metadata.customMinutes);
+          setCustomBreakMinutes(metadata.customBreakMinutes);
+          setSubjectId(metadata.subjectId);
+          setTopicId(metadata.topicId);
+          setPhase("break");
+          setRemaining(Math.max(0, metadata.remaining - breakElapsed));
+          setStopwatchSeconds(0);
+          setStatus(metadata.status);
+          setRecoveryStatus("ready");
+          return;
+        }
+        if (metadata) {
+          setRecoveryChoice({
+            type: "stale",
+            metadata,
+            reason: "No unfinished server session was found, but saved timer details remain.",
+          });
+          setRecoveryStatus("choice");
+          return;
+        }
+        setRecoveryStatus("ready");
+      } catch (error) {
+        if (!alive) return;
+        const userId = error.userId || authenticatedUserId || null;
+        userIdRef.current = userId;
+        setRecoveryChoice({
+          type: "error",
+          metadata: readFocusMetadata(userId),
+        });
+        setRecoveryError(error.message || "Could not check for an active Focus session.");
+        setRecoveryStatus("error");
+      }
+    })();
+
+    return () => { alive = false; };
+  }, [authenticatedUserId, onRecoverSession, recoveryAttempt, restoreServerSession]);
+
+  const retryRecovery = useCallback(() => {
+    setRecoveryError("");
+    setRecoveryChoice(null);
+    setRecoveryStatus("checking");
+    setRecoveryAttempt((attempt) => attempt + 1);
+  }, []);
+
+  const cancelRecoveredSession = useCallback(async (timerSession) => {
+    if (actionInFlightRef.current) return;
+    actionInFlightRef.current = true;
+    setActionPending(true);
+    setTimerError("");
+    try {
+      await onCancelSession(timerSession);
+      clearFocusMetadata(timerSession.userId || userIdRef.current);
+      timerSessionRef.current = null;
+      recoverySessionRef.current = null;
+      setRecoveryChoice(null);
+      setRecoveryError("");
+      setRecoveryStatus("ready");
+      setStatus("idle");
+      setPhase("focus");
+      setRemaining(focusSeconds);
+      setStopwatchSeconds(0);
+    } catch (error) {
+      console.error("Could not cancel recovered Focus session", error);
+      setTimerError(error.message || "Could not cancel the recovered Focus session.");
+    } finally {
+      actionInFlightRef.current = false;
+      setActionPending(false);
+    }
+  }, [focusSeconds, onCancelSession]);
+
+  const resolveStaleRecovery = useCallback(() => {
+    clearFocusMetadata(userIdRef.current);
+    timerSessionRef.current = null;
+    recoverySessionRef.current = null;
+    setRecoveryChoice(null);
+    setRecoveryError("");
+    setRecoveryStatus("ready");
+    setStatus("idle");
+    setPhase("focus");
+    setRemaining(focusSeconds);
+    setStopwatchSeconds(0);
+  }, [focusSeconds]);
+
+  const restoreWithDefaults = useCallback(() => {
+    if (recoveryChoice?.type !== "active") return;
+    restoreServerSession(
+      null,
+      recoveryChoice.session,
+      recoveryChoice.elapsedSeconds,
+      recoveryChoice.isRunning,
+      true
+    );
+  }, [recoveryChoice, restoreServerSession]);
+
+  useEffect(() => {
+    if (recoveryStatus !== "ready") return;
+    const timerSession = timerSessionRef.current;
+    if (timerSession?.kind === "server" || (mode === "pomodoro" && phase === "break")) {
+      const metadata = currentMetadata(status);
+      if (timerSession?.kind === "server") {
+        metadata.sessionMode = "server";
+        metadata.serverSessionId = timerSession.serverSessionId;
+      } else {
+        metadata.sessionMode = "pomodoro-break";
+        metadata.serverSessionId = null;
+      }
+      writeFocusMetadata(timerSession?.userId || userIdRef.current, metadata);
+    }
+  }, [currentMetadata, mode, phase, recoveryStatus, status]);
+
+  const beginFocusInterval = useCallback(async () => {
+    const session = await onStartSession();
+    timerSessionRef.current = session;
+    recoverySessionRef.current = session.kind === "server" ? session : null;
+    userIdRef.current = session.userId || userIdRef.current;
+    segmentStartedAtRef.current = new Date().toISOString();
+    if (session.kind === "server") {
+      writeFocusMetadata(session.userId, currentMetadata("running", {
+        sessionMode: "server",
+        serverSessionId: session.serverSessionId,
+        phase: mode === "pomodoro" && phase === "break" ? "focus" : phase,
+        remaining: mode === "pomodoro" && phase === "break" ? focusSeconds : remaining,
+      }));
+    }
+  }, [currentMetadata, focusSeconds, mode, onStartSession, phase, remaining]);
+
+  const completeFocusInterval = useCallback(async (durationSec, nextPhase) => {
+    if (actionInFlightRef.current) return;
+    actionInFlightRef.current = true;
+    setActionPending(true);
+    setTimerError("");
+    try {
+      const timerSession = timerSessionRef.current;
+      if (durationSec >= 60) {
+        const endedAt = new Date();
+        await onCompleteSession({
+          id: `session-${Date.now()}`,
+          sessionMode: timerSession?.kind || "local",
+          serverSessionId: timerSession?.serverSessionId || null,
+          subjectId,
+          topicId,
+          durationSec,
+          startedAt: segmentStartedAtRef.current
+            || new Date(endedAt.getTime() - durationSec * 1000).toISOString(),
+          endedAt: endedAt.toISOString(),
+        });
+        if (timerSession?.kind === "server") clearFocusMetadata(timerSession.userId);
+        setJustSaved(true);
+      } else if (timerSession) {
+        await onCancelSession(timerSession);
+        if (timerSession.kind === "server") clearFocusMetadata(timerSession.userId);
+      }
+      timerSessionRef.current = null;
+      segmentStartedAtRef.current = null;
+      if (nextPhase === "break") {
+        setPhase("break");
+        setRemaining(breakSeconds);
+      } else {
+        setStatus("idle");
+        setPhase("focus");
+        setRemaining(focusSeconds);
+        setStopwatchSeconds(0);
+      }
+    } catch (error) {
+      console.error("Could not finish Focus session", error);
+      setTimerError(error.message || "Could not finish this Focus session. Please try again.");
+      setStatus("paused");
+    } finally {
+      actionInFlightRef.current = false;
+      setActionPending(false);
+    }
+  }, [
+    breakSeconds,
+    focusSeconds,
+    onCancelSession,
+    onCompleteSession,
+    subjectId,
+    topicId,
+  ]);
+
+  const beginNextPomodoroFocus = useCallback(async () => {
+    if (actionInFlightRef.current) return;
+    actionInFlightRef.current = true;
+    setActionPending(true);
+    setTimerError("");
+    try {
+      await beginFocusInterval();
+      setPhase("focus");
+      setRemaining(focusSeconds);
+    } catch (error) {
+      console.error("Could not start the next Focus interval", error);
+      setTimerError(error.message || "Could not start the next Focus interval.");
+      setStatus("paused");
+    } finally {
+      actionInFlightRef.current = false;
+      setActionPending(false);
+    }
+  }, [beginFocusInterval, focusSeconds]);
+
+  const startClock = useCallback(async () => {
+    if (actionInFlightRef.current) return;
+    actionInFlightRef.current = true;
+    setActionPending(true);
+    setTimerError("");
+    try {
+      if (mode === "pomodoro" && phase === "break" && remaining <= 0) {
+        await beginFocusInterval();
+        setPhase("focus");
+        setRemaining(focusSeconds);
+      } else {
+        await beginFocusInterval();
+      }
+      setStatus("running");
+    } catch (error) {
+      console.error("Could not start Focus session", error);
+      setTimerError(error.message || "Could not start Focus session. Please try again.");
+    } finally {
+      actionInFlightRef.current = false;
+      setActionPending(false);
+    }
+  }, [beginFocusInterval, focusSeconds, mode, phase, remaining]);
+
+  const pauseClock = useCallback(async () => {
+    if (actionInFlightRef.current) return;
+    actionInFlightRef.current = true;
+    setActionPending(true);
+    setTimerError("");
+    try {
+      if (timerSessionRef.current) await onPauseSession(timerSessionRef.current);
+      setStatus("paused");
+    } catch (error) {
+      console.error("Could not pause Focus session", error);
+      setTimerError(error.message || "Could not pause Focus session. Please try again.");
+    } finally {
+      actionInFlightRef.current = false;
+      setActionPending(false);
+    }
+  }, [onPauseSession]);
+
+  const resumeClock = useCallback(async () => {
+    if (actionInFlightRef.current) return;
+    actionInFlightRef.current = true;
+    setActionPending(true);
+    setTimerError("");
+    try {
+      if (mode === "pomodoro" && phase === "break") {
+        if (remaining <= 0) {
+          await beginFocusInterval();
+          setPhase("focus");
+          setRemaining(focusSeconds);
+        }
+      } else if (timerSessionRef.current) {
+        await onResumeSession(timerSessionRef.current);
+      } else {
+        await beginFocusInterval();
+      }
+      setStatus("running");
+    } catch (error) {
+      console.error("Could not resume Focus session", error);
+      setTimerError(error.message || "Could not resume Focus session. Please try again.");
+    } finally {
+      actionInFlightRef.current = false;
+      setActionPending(false);
+    }
+  }, [beginFocusInterval, focusSeconds, mode, onResumeSession, phase, remaining]);
+
+  useEffect(() => {
+    if (status !== "running" || actionPending) return undefined;
     const interval = setInterval(() => {
       if (mode === "stopwatch") {
         setStopwatchSeconds((seconds) => seconds + 1);
@@ -1162,28 +1666,32 @@ function TimerView({ onCompleteSession, todayMinutes, t }) {
       }
 
       if (remaining > 1) {
-        setRemaining(remaining - 1);
+        setRemaining((seconds) => Math.max(0, seconds - 1));
         return;
       }
 
       if (mode === "pomodoro") {
         if (phase === "focus") {
-          saveSession(focusSeconds);
-          setPhase("break");
-          setRemaining(breakSeconds);
+          void completeFocusInterval(focusSeconds, "break");
         } else {
-          setPhase("focus");
-          setRemaining(focusSeconds);
+          void beginNextPomodoroFocus();
         }
         return;
       }
 
-      saveSession(focusSeconds);
-      setStatus("idle");
-      setRemaining(focusSeconds);
+      void completeFocusInterval(focusSeconds, "idle");
     }, 1000);
     return () => clearInterval(interval);
-  }, [breakSeconds, focusSeconds, mode, phase, remaining, saveSession, status]);
+  }, [
+    actionPending,
+    beginNextPomodoroFocus,
+    completeFocusInterval,
+    focusSeconds,
+    mode,
+    phase,
+    remaining,
+    status,
+  ]);
 
   useEffect(() => {
     if (!justSaved) return undefined;
@@ -1191,12 +1699,32 @@ function TimerView({ onCompleteSession, todayMinutes, t }) {
     return () => clearTimeout(timeout);
   }, [justSaved]);
 
-  function resetClock() {
-    setStatus("idle");
-    setPhase("focus");
-    setRemaining(focusSeconds);
-    setStopwatchSeconds(0);
-  }
+  const resetClock = useCallback(async () => {
+    if (actionInFlightRef.current) return;
+    actionInFlightRef.current = true;
+    setActionPending(true);
+    setTimerError("");
+    try {
+      if (timerSessionRef.current) await onCancelSession(timerSessionRef.current);
+      if (timerSessionRef.current?.kind === "server") {
+        clearFocusMetadata(timerSessionRef.current.userId);
+      } else if (mode === "pomodoro" && phase === "break") {
+        clearFocusMetadata(userIdRef.current);
+      }
+      timerSessionRef.current = null;
+      segmentStartedAtRef.current = null;
+      setStatus("idle");
+      setPhase("focus");
+      setRemaining(focusSeconds);
+      setStopwatchSeconds(0);
+    } catch (error) {
+      console.error("Could not reset Focus session", error);
+      setTimerError(error.message || "Could not reset Focus session. Please try again.");
+    } finally {
+      actionInFlightRef.current = false;
+      setActionPending(false);
+    }
+  }, [focusSeconds, mode, onCancelSession, phase]);
 
   function chooseMode(nextMode) {
     if (!idle) return;
@@ -1212,14 +1740,25 @@ function TimerView({ onCompleteSession, todayMinutes, t }) {
     setRemaining((nextPreset.focusMin ?? customMinutes) * 60);
   }
 
-  function stopClock() {
-    if (mode === "stopwatch") {
-      saveSession(stopwatchSeconds);
-    } else if (mode !== "pomodoro" || phase === "focus") {
-      saveSession(Math.max(0, segmentSeconds - remaining));
+  const stopClock = useCallback(async () => {
+    if (actionInFlightRef.current) return;
+    if (mode === "pomodoro" && phase === "break") {
+      await resetClock();
+      return;
     }
-    resetClock();
-  }
+    const durationSec = mode === "stopwatch"
+      ? stopwatchSeconds
+      : Math.max(0, segmentSeconds - remaining);
+    await completeFocusInterval(durationSec, "idle");
+  }, [
+    completeFocusInterval,
+    mode,
+    phase,
+    remaining,
+    resetClock,
+    segmentSeconds,
+    stopwatchSeconds,
+  ]);
 
   function changeSubject(nextSubjectId) {
     setSubjectId(nextSubjectId);
@@ -1253,6 +1792,64 @@ function TimerView({ onCompleteSession, todayMinutes, t }) {
       </div>
 
       <div className="sr-only" role="status" aria-live="polite">{announce}</div>
+      {recoveryStatus === "checking" && (
+        <div role="status" style={{ marginBottom: 12, color: t.textMuted }}>
+          Checking for an active Focus session…
+        </div>
+      )}
+      {recoveryStatus === "error" && (
+        <div role="alert" style={{ marginBottom: 12, color: "#F2635C", lineHeight: 1.5 }}>
+          <p>{recoveryError}</p>
+          <div className="timer-actions">
+            <TimerButton label="Retry recovery" onClick={retryRecovery} disabled={actionPending} t={t} />
+            {recoveryChoice?.metadata?.serverSessionId && (
+              <TimerButton
+                label="Cancel saved session"
+                onClick={() => cancelRecoveredSession({
+                  kind: "server",
+                  serverSessionId: recoveryChoice.metadata.serverSessionId,
+                  userId: userIdRef.current,
+                })}
+                disabled={actionPending}
+                t={t}
+              />
+            )}
+          </div>
+        </div>
+      )}
+      {recoveryStatus === "choice" && recoveryChoice && (
+        <div role="alert" style={{ marginBottom: 12, color: t.textMuted, lineHeight: 1.5 }}>
+          <p>{recoveryChoice.reason}</p>
+          {recoveryChoice.type === "active" ? (
+            <div className="timer-actions">
+              <TimerButton
+                label="Restore as stopwatch"
+                primary
+                onClick={restoreWithDefaults}
+                disabled={actionPending}
+                t={t}
+              />
+              <TimerButton
+                label="Cancel recovered session"
+                onClick={() => cancelRecoveredSession(recoveryChoice.session)}
+                disabled={actionPending}
+                t={t}
+              />
+              <TimerButton label="Retry recovery" onClick={retryRecovery} disabled={actionPending} t={t} />
+            </div>
+          ) : (
+            <div className="timer-actions">
+              <TimerButton
+                label="Clear stale saved details"
+                onClick={resolveStaleRecovery}
+                disabled={actionPending}
+                t={t}
+              />
+              <TimerButton label="Retry recovery" onClick={retryRecovery} disabled={actionPending} t={t} />
+            </div>
+          )}
+        </div>
+      )}
       <section className="timer-panel">
         <div className="timer-mode-switch" role="tablist" aria-label="Timer mode">
           {TIMER_MODES.map((timerMode) => (
@@ -1261,7 +1858,7 @@ function TimerView({ onCompleteSession, todayMinutes, t }) {
               type="button"
               role="tab"
               aria-selected={mode === timerMode.id}
-              disabled={!idle}
+              disabled={!idle || timerLocked}
               className={`timer-mode-switch__button${mode === timerMode.id ? " is-active" : ""}`}
               onClick={() => chooseMode(timerMode.id)}
             >
@@ -1293,14 +1890,14 @@ function TimerView({ onCompleteSession, todayMinutes, t }) {
           <div className="timer-config">
             <div className="timer-actions">
               {idle ? (
-                <TimerButton label="Start" icon={Play} primary onClick={() => setStatus("running")} t={t} />
+                <TimerButton label="Start" icon={Play} primary onClick={startClock} disabled={timerLocked} t={t} />
               ) : running ? (
-                <TimerButton label="Pause" icon={Pause} onClick={() => setStatus("paused")} t={t} />
+                <TimerButton label="Pause" icon={Pause} onClick={pauseClock} disabled={timerLocked} t={t} />
               ) : (
-                <TimerButton label="Resume" icon={Play} primary onClick={() => setStatus("running")} t={t} />
+                <TimerButton label="Resume" icon={Play} primary onClick={resumeClock} disabled={timerLocked} t={t} />
               )}
-              {!idle && <TimerButton label="Stop" onClick={stopClock} t={t} />}
-              <TimerButton label="Reset" icon={RotateCcw} onClick={resetClock} t={t} />
+              {!idle && <TimerButton label="Stop" onClick={stopClock} disabled={timerLocked} t={t} />}
+              <TimerButton label="Reset" icon={RotateCcw} onClick={resetClock} disabled={timerLocked} t={t} />
               <div className="timer-xp" style={{ color: t.textMuted }}>
                 <Zap size={14} fill="currentColor" />
                 <span>Earn 1 XP per focused minute</span>
@@ -1308,6 +1905,11 @@ function TimerView({ onCompleteSession, todayMinutes, t }) {
             </div>
 
             {justSaved && <div className="timer-saved" role="status">Session saved</div>}
+            {timerError && (
+              <div role="alert" style={{ color: "#F2635C", fontSize: 13, lineHeight: 1.5 }}>
+                {timerError}
+              </div>
+            )}
 
             {mode !== "stopwatch" && (
               <div className="timer-presets" aria-label={mode === "pomodoro" ? "Pomodoro presets" : "Timer presets"}>
@@ -1319,7 +1921,7 @@ function TimerView({ onCompleteSession, todayMinutes, t }) {
                     <button
                       key={preset.id}
                       type="button"
-                      disabled={!idle}
+                      disabled={!idle || timerLocked}
                       aria-pressed={presetId === preset.id}
                       className={`timer-preset${presetId === preset.id ? " is-active" : ""}`}
                       style={{ "--timer-accent": ACCENT }}
@@ -1337,7 +1939,7 @@ function TimerView({ onCompleteSession, todayMinutes, t }) {
                 <label>
                   <span>Focus</span>
                   <input
-                    type="number" min={1} max={180} disabled={!idle} value={customMinutes}
+                    type="number" min={1} max={180} disabled={!idle || timerLocked} value={customMinutes}
                     aria-label="Focus duration in minutes"
                     onChange={(event) => {
                       const nextMinutes = Math.min(180, Math.max(1, Number(event.target.value) || 1));
@@ -1352,7 +1954,7 @@ function TimerView({ onCompleteSession, todayMinutes, t }) {
                   <label>
                     <span>Break</span>
                     <input
-                      type="number" min={1} max={60} disabled={!idle} value={customBreakMinutes}
+                      type="number" min={1} max={60} disabled={!idle || timerLocked} value={customBreakMinutes}
                       aria-label="Break duration in minutes"
                       onChange={(event) => setCustomBreakMinutes(Math.min(60, Math.max(1, Number(event.target.value) || 1)))}
                       style={{ borderColor: t.border, background: t.bg, color: t.text }}
@@ -1367,7 +1969,7 @@ function TimerView({ onCompleteSession, todayMinutes, t }) {
               <label className="timer-select" style={{ color: t.textMuted }}>
                 <span>Subject</span>
                 <select
-                  value={subjectId} disabled={!idle}
+                  value={subjectId} disabled={!idle || timerLocked}
                   onChange={(event) => changeSubject(event.target.value)}
                   style={{ "--select-border": t.border, "--select-background": t.bg, color: t.text }}
                 >
@@ -1379,7 +1981,7 @@ function TimerView({ onCompleteSession, todayMinutes, t }) {
               <label className="timer-select" style={{ color: t.textMuted }}>
                 <span>Chapter</span>
                 <select
-                  value={topicId} disabled={!idle}
+                  value={topicId} disabled={!idle || timerLocked}
                   onChange={(event) => setTopicId(event.target.value)}
                   style={{ "--select-border": t.border, "--select-background": t.bg, color: t.text }}
                 >
@@ -2859,7 +3461,7 @@ function SpaceBackground({ style }) {
 
     /* ---------- state ---------- */
     const cam={x:0,y:0,vx:0,vy:0};
-    let ptX=0,ptY=0,nx=0,ny=0,mx=-9999,my=-9999,cvx=0,cvy=0,act=false,press=0,pr=0,moved=false;
+    let ptX=0,ptY=0,nx=0,ny=0,mx=-9999,my=-9999,cvx=0,cvy=0,act=false,press=0,pr=0;
     let cy,sy,cp,sp,cr,sr,gcx,gcy,GS,LR=300,LR2=9e4,PX,PY,PS,ddt=.016,t=0;
     let shoot=null,nextShoot=3.5;
 
@@ -2867,7 +3469,6 @@ function SpaceBackground({ style }) {
       ptX=e.clientX;ptY=e.clientY;nx=ptX/W*2-1;ny=ptY/H*2-1;
       if(!act){mx=ptX;my=ptY}
       act=true;
-      moved=true;
     },{passive:true});
     on(window,'pointerdown',()=>{press=1});
     on(window,'pointerup',()=>{press=0});
@@ -3783,7 +4384,11 @@ function ProfileView({ profile, auth, google, planName, xp, streak, onSave, t })
     if (u === (profile.username || "")) { setUstate({ status: "same" }); return undefined; }
     setUstate({ status: "checking" });
     let alive = true;
-    const id = setTimeout(async () => { const r = await usernameApi.check(u, ownerKey); if (alive) setUstate({ status: r.status }); }, 450);
+    const id = setTimeout(async () => {
+      let status = "unverified";
+      try { status = (await usernameApi.check(u, ownerKey)).status; } catch { /* network problem: don't block the user */ }
+      if (alive) setUstate({ status });
+    }, 450);
     return () => { alive = false; clearTimeout(id); };
   }, [draft?.username, editing, profile.username, ownerKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -4185,7 +4790,8 @@ function LbInlineForm({ placeholder, extra, button, onSubmit, t }) {
     e.preventDefault();
     if (!v.trim() || busy) return;
     setBusy(true); setMsg(null);
-    const r = await onSubmit(v, v2);
+    let r;
+    try { r = await onSubmit(v, v2); } catch { r = { ok: false, error: "Something went wrong. Please try again." }; }
     setBusy(false);
     if (r.ok) { setV(""); setV2(""); if (r.message) setMsg({ ok: true, text: r.message }); } else setMsg({ ok: false, text: r.error });
   };
@@ -4224,7 +4830,7 @@ function LeaderboardPanel({ open, onClose, profile, streak, onOpenProfile, t }) 
   useEffect(() => {
     if (!ready || scope !== "school" || needle.length < 3) { setIdHits(new Set()); return undefined; }
     let alive = true;
-    const id = setTimeout(async () => { const ids = await leaderboardApi.searchIds(needle); if (alive) setIdHits(new Set(ids)); }, 250);
+    const id = setTimeout(async () => { const ids = await leaderboardApi.searchIds(needle).catch(() => []); if (alive) setIdHits(new Set(ids)); }, 250);
     return () => { alive = false; clearTimeout(id); };
   }, [needle, scope, ready]);
 
@@ -4277,8 +4883,8 @@ function LeaderboardPanel({ open, onClose, profile, streak, onOpenProfile, t }) 
                   <div key={r.user_id} className="lb-row">
                     <Avatar avatar={r.avatar} name={r.name} size={32} />
                     <span className="lb-id"><span className="lb-name" style={{ color: t.text }}>{r.name}</span><span className="lb-sub" style={{ color: t.textFaint }}>@{r.username}</span></span>
-                    <button className="pf-btn pf-btn--primary" style={{ padding: "6px 12px" }} onClick={async () => { await leaderboardApi.respond(data.uid, r.user_id, true); refresh(); }}>Accept</button>
-                    <button className="pf-btn pf-btn--ghost" style={{ padding: "6px 12px", color: t.text, borderColor: t.border }} onClick={async () => { await leaderboardApi.respond(data.uid, r.user_id, false); refresh(); }}>Decline</button>
+                    <button className="pf-btn pf-btn--primary" style={{ padding: "6px 12px" }} onClick={async () => { await leaderboardApi.respond(data.uid, r.user_id, true).catch(() => false); refresh(); }}>Accept</button>
+                    <button className="pf-btn pf-btn--ghost" style={{ padding: "6px 12px", color: t.text, borderColor: t.border }} onClick={async () => { await leaderboardApi.respond(data.uid, r.user_id, false).catch(() => false); refresh(); }}>Decline</button>
                   </div>
                 ))}
               </div>
@@ -4463,14 +5069,15 @@ function MobileNav({ active, lbOpen, onSelect, onLeaderboard, profile, t }) {
   useEffect(() => {
     const field = "input:not([type=range]):not([type=checkbox]),textarea,select";
     const on = (e) => {
-      if (!e.target.matches?.(field)) return;
+      if (!e.target.matches?.(field)) { document.documentElement.classList.remove("kb-open"); return; }
       document.documentElement.classList.add("kb-open");
       const calm = matchMedia("(prefers-reduced-motion: reduce)").matches;
       setTimeout(() => e.target.scrollIntoView?.({ block: "center", behavior: calm ? "auto" : "smooth" }), 320);
     };
     const off = () => document.documentElement.classList.remove("kb-open");
-    document.addEventListener("focusin", on); document.addEventListener("focusout", off);
-    return () => { document.removeEventListener("focusin", on); document.removeEventListener("focusout", off); off(); };
+    const tap = (e) => { if (!e.target.closest?.(field)) off(); };   // field removed while focused: never leave the bar hidden
+    document.addEventListener("focusin", on); document.addEventListener("focusout", off); document.addEventListener("pointerdown", tap);
+    return () => { document.removeEventListener("focusin", on); document.removeEventListener("focusout", off); document.removeEventListener("pointerdown", tap); off(); };
   }, []);
   const items = [
     { id: "dashboard", label: "Home", icon: LayoutDashboard },
@@ -4556,6 +5163,7 @@ export default function Orbis() {
   const [auth, setAuth] = useState(DEFAULT_AUTH);
   const [titleSystem, setTitleSystem] = useState(DEFAULT_TITLE_SYSTEM);
   const [activeTab, setActiveTab] = useState("dashboard");
+  const skipLeaderboardSyncRef = useRef(false);
 
   useEffect(() => {
     let mounted = true;
@@ -4611,16 +5219,115 @@ export default function Orbis() {
     });
   }, [awardXp]);
 
-  // Phase 3: a finished timer session is appended, persisted, and its
-  // XP (computed by the timer via computeSessionXp) is credited.
-  const handleCompleteSession = useCallback((session) => {
+  const handleRecoverSession = useCallback(async () => {
+    if (!isSupabaseConfigured) return { kind: "local" };
+    const { data, error } = await supabase.auth.getSession();
+    if (error) {
+      const recoveryError = new Error(`Could not verify your Supabase session: ${error.message}`);
+      recoveryError.userId = auth.userId || null;
+      throw recoveryError;
+    }
+    const userId = data.session?.user?.id;
+    if (!userId) return { kind: "local" };
+
+    const { data: activeRows, error: recoveryRpcError } = await supabase.rpc("get_active_focus_session");
+    if (recoveryRpcError) {
+      const recoveryError = new Error(`Could not recover active Focus session: ${recoveryRpcError.message}`);
+      recoveryError.userId = userId;
+      throw recoveryError;
+    }
+    const activeSession = Array.isArray(activeRows) ? activeRows[0] || null : activeRows || null;
+    return { kind: "server", userId, activeSession };
+  }, [auth.userId]);
+
+  const handleStartSession = useCallback(async () => {
+    if (!isSupabaseConfigured) return { kind: "local" };
+
+    const { data, error } = await supabase.auth.getSession();
+    if (error) throw new Error(`Could not verify your Supabase session: ${error.message}`);
+    if (!data.session?.user?.id) return { kind: "local" };
+
+    const { data: serverSessionId, error: startError } = await supabase.rpc("start_focus_session");
+    if (startError) {
+      const duplicateStart = startError.code === "23505"
+        || startError.message?.includes("focus_sessions_one_active_per_user_idx");
+      if (duplicateStart) {
+        throw new Error("An active Focus session already exists for this account. Reopen the Timer tab or retry recovery before starting another session.");
+      }
+      throw new Error(`Could not start Focus session: ${startError.message}`);
+    }
+    if (typeof serverSessionId !== "string" || !serverSessionId) {
+      throw new Error("The server did not return a valid Focus session ID.");
+    }
+    return { kind: "server", serverSessionId, userId: data.session.user.id };
+  }, []);
+
+  const handlePauseSession = useCallback(async (timerSession) => {
+    if (timerSession.kind !== "server") return;
+    if (!timerSession.serverSessionId) throw new Error("The server Focus session ID is missing.");
+    const { data, error } = await supabase.rpc("pause_focus_session", {
+      p_session_id: timerSession.serverSessionId,
+    });
+    if (error) throw new Error(`Could not pause Focus session: ${error.message}`);
+    if (typeof data !== "number" || !Number.isFinite(data)) {
+      throw new Error("The server returned an invalid paused-session duration.");
+    }
+    return data;
+  }, []);
+
+  const handleResumeSession = useCallback(async (timerSession) => {
+    if (timerSession.kind !== "server") return;
+    if (!timerSession.serverSessionId) throw new Error("The server Focus session ID is missing.");
+    const { data, error } = await supabase.rpc("resume_focus_session", {
+      p_session_id: timerSession.serverSessionId,
+    });
+    if (error) throw new Error(`Could not resume Focus session: ${error.message}`);
+    if (data !== true) throw new Error("The server could not resume this Focus session.");
+  }, []);
+
+  const handleCancelSession = useCallback(async (timerSession) => {
+    if (timerSession.kind !== "server") return;
+    if (!timerSession.serverSessionId) throw new Error("The server Focus session ID is missing.");
+    const { data, error } = await supabase.rpc("cancel_focus_session", {
+      p_session_id: timerSession.serverSessionId,
+    });
+    if (error) throw new Error(`Could not cancel Focus session: ${error.message}`);
+    if (data !== true) throw new Error("The server could not cancel this Focus session.");
+  }, []);
+
+  // Server-backed completions are only persisted locally after the authoritative
+  // RPC succeeds; guest sessions remain entirely in the local XP flow.
+  const handleCompleteSession = useCallback(async (session) => {
+    let xpEarned;
+    if (session.sessionMode === "server") {
+      if (!session.serverSessionId) throw new Error("The server Focus session ID is missing.");
+      const { data: serverXp, error } = await supabase.rpc("complete_focus_session", {
+        p_session_id: session.serverSessionId,
+      });
+      if (error) throw new Error(`Could not complete Focus session: ${error.message}`);
+      if (typeof serverXp !== "number" || !Number.isFinite(serverXp) || serverXp < 0) {
+        throw new Error("The server returned an invalid Focus XP award.");
+      }
+      xpEarned = serverXp;
+      if (auth.loggedIn && profile.username) skipLeaderboardSyncRef.current = true;
+    } else if (session.sessionMode === "local") {
+      xpEarned = computeSessionXp(session.durationSec);
+    } else {
+      throw new Error("The Focus session has an unknown storage mode.");
+    }
+
+    const savedSession = { ...session, xpEarned };
     setSessions((prev) => {
-      const next = [...prev, session];
+      const next = [...prev, savedSession];
       db.saveSessions(next);
       return next;
     });
-    awardXp(session.xpEarned);
-  }, [awardXp]);
+    setProfile((prev) => {
+      const next = { ...prev, xp: prev.xp + xpEarned };
+      db.saveProfile(next);
+      return next;
+    });
+  }, [auth.loggedIn, profile.username]);
 
   // Phase: Institution — mark a notice read and persist it. Everything else
   // in the institution dashboard is institution-authored seed data, so it
@@ -4652,13 +5359,13 @@ export default function Orbis() {
       setTasks(tk);
       setReadNoticeIds(rn);
       setTitleSystem(titleData);
-      const next = { loggedIn: true, email: data.user.email };
+      const next = { loggedIn: true, email: data.user.email, userId: data.user.id };
       setAuth(next);
       setLoading(false);
       return;
     }
 
-    const next = { loggedIn: true, email };
+    const next = { loggedIn: true, email, userId: null };
     setAuth(next);
     db.saveAuth(next);
   }, []);
@@ -4668,7 +5375,7 @@ export default function Orbis() {
       const { error } = await supabase.auth.signOut();
       if (error) console.error("Could not sign out of Supabase", error);
     }
-    const next = { loggedIn: false, email: null };
+    const next = { loggedIn: false, email: null, userId: null };
     setAuth(next);
     if (!isSupabaseConfigured) db.saveAuth(next);
   }, []);
@@ -4796,7 +5503,8 @@ export default function Orbis() {
 
   const handleSaveProfile = useCallback(async ({ name, username, avatar }) => {
     if (username !== (profile.username || "")) {
-      const claimed = await usernameApi.claim(username, auth.email || "guest", profile.username);
+      let claimed;
+      try { claimed = await usernameApi.claim(username, auth.email || "guest", profile.username); } catch { return { ok: false, error: "failed" }; }
       if (!claimed.ok) return claimed;
     }
     setProfile((previous) => {
@@ -4896,8 +5604,24 @@ export default function Orbis() {
 
   useEffect(() => {
     if (!auth.loggedIn || !isSupabaseConfigured || !profile.username) return undefined;
-    const id = setTimeout(() => {
-      leaderboardApi.sync({ username: profile.username, name: profile.name, avatar: profile.avatar, xp: profile.xp, streak: streak.current, best: streak.longest });
+    const id = setTimeout(async () => {
+      if (skipLeaderboardSyncRef.current) {
+        skipLeaderboardSyncRef.current = false;
+        return;
+      }
+      try {
+        if (!await leaderboardApi.uid()) return;
+        await leaderboardApi.sync({
+          username: profile.username,
+          name: profile.name,
+          avatar: profile.avatar,
+          xp: profile.xp,
+          streak: streak.current,
+          best: streak.longest,
+        });
+      } catch (error) {
+        console.error("Could not synchronize the leaderboard", error);
+      }
     }, 2000);
     return () => clearTimeout(id);
   }, [auth.loggedIn, profile.username, profile.name, profile.avatar, profile.xp, streak.current, streak.longest]);
@@ -5099,6 +5823,12 @@ export default function Orbis() {
             />
           ) : activeTab === "timer" ? (
             <TimerView
+              authenticatedUserId={auth.userId}
+              onRecoverSession={handleRecoverSession}
+              onStartSession={handleStartSession}
+              onPauseSession={handlePauseSession}
+              onResumeSession={handleResumeSession}
+              onCancelSession={handleCancelSession}
               onCompleteSession={handleCompleteSession}
               todayMinutes={todayMinutes}
               t={t}
