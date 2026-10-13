@@ -316,8 +316,18 @@ declare
   pending public.institute_invitations%rowtype;
   accepted public.institute_memberships%rowtype;
 begin
-  if auth.uid() is null or auth.jwt() ->> 'email' is null then
+  if auth.uid() is null then
     raise exception 'Authentication is required';
+  end if;
+
+  if not exists (
+    select 1
+    from auth.users u
+    where u.id = auth.uid()
+      and u.email_confirmed_at is not null
+      and lower(u.email) = lower(auth.jwt() ->> 'email')
+  ) then
+    raise exception 'A verified email is required to accept institute invitations';
   end if;
 
   for pending in
