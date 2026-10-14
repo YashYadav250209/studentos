@@ -2059,3 +2059,124 @@ input:focus {
     transition: none !important;
   }
 }
+
+
+/* ==========================================================================
+   33. QUICK ACTIONS (dashboard shortcuts)
+   Four compact glass tiles under the stat row, on the same 4-column grid and
+   12px gap. Surface/border/text arrive from the theme tokens in App.jsx as
+   --qa-* custom properties (same pattern as .timer-action). The blur is set
+   here, not inline, so CardFX (which targets inline backdrop-filter) leaves
+   these small tiles alone: no particles or glow border, just the standard
+   button sheen. Hover is colour/border/shadow only, per section 28.
+   ========================================================================== */
+
+.quick-actions {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.quick-action {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 52px;
+  padding: 10px 14px;
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  text-align: left;
+  color: var(--qa-text);
+  background: var(--qa-surface);
+  border: 1px solid var(--qa-border);
+  border-radius: 14px;
+  box-shadow: var(--shadow-card);
+  -webkit-backdrop-filter: blur(10px) saturate(1.1);
+  backdrop-filter: blur(10px) saturate(1.1);
+  cursor: pointer;
+  transition:
+    transform var(--transition-fast),
+    box-shadow var(--transition-smooth),
+    border-color var(--transition-fast),
+    filter var(--transition-fast);
+}
+
+.quick-action__icon {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  color: var(--qa-muted);
+  background: var(--row-hover);
+  border: 1px solid var(--glass-border);
+  transition: color var(--transition-fast);
+}
+
+.quick-action__label {
+  min-width: 0;
+  line-height: 1.25;
+}
+
+/* Start Focus: the one accented tile (soft accent chip + tinted border). */
+.quick-action.is-primary {
+  border-color: var(--accent-border);
+}
+
+.quick-action.is-primary .quick-action__icon {
+  color: var(--accent-text);
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
+}
+
+/* Hover only where a real hover exists, so touch screens never get a stuck state. */
+@media (hover: hover) {
+  .quick-action:hover {
+    border-color: var(--accent-border);
+    box-shadow: var(--shadow-hover);
+  }
+
+  .quick-action.is-primary:hover {
+    border-color: rgba(255, 94, 58, 0.5);
+  }
+
+  .quick-action:not(.is-primary):hover .quick-action__icon {
+    color: var(--qa-text);
+  }
+}
+
+/* After the hover block so pressing while hovered still settles the shadow. */
+.quick-action:active {
+  box-shadow: var(--shadow-subtle);
+}
+
+/* The global focus ring (section 32) already applies; this only stops the
+   global button:focus-visible rule from shrinking the corners to 6px. */
+.quick-action:focus-visible {
+  border-radius: 14px;
+}
+
+/* Below ~960px four tiles would each be under ~165px wide and start wrapping
+   their labels (this band includes a portrait iPad Pro 11" and a half-screen
+   window on a 1920px display), so go 2x2 a little before the 820px mobile shell. */
+@media (max-width: 960px) {
+  .quick-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 820px) {
+  .quick-actions {
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+
+  .quick-action {
+    -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: blur(8px);
+  }
+}

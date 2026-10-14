@@ -862,6 +862,36 @@ const NAV_ITEMS = [
   { id: "subscription", label: "Plans & Billing", icon: CreditCard, phase: 0 },
 ];
 
+/* Dashboard shortcuts. Navigation only: every id below is a NAV_ITEMS id, and each tile
+   calls the same setActiveTab the sidebar and mobile nav use. Styling lives in App.css (§33). */
+const QUICK_ACTIONS = [
+  { id: "timer", label: "Start Focus", icon: Play, primary: true },
+  { id: "plan", label: "Today's Plan", icon: ListChecks },
+  { id: "syllabus", label: "Syllabus", icon: BookOpen },
+  { id: "progress", label: "Progress", icon: LineChart },
+];
+
+function QuickActions({ onNavigate, t }) {
+  return (
+    <div className="quick-actions" role="group" aria-label="Quick actions">
+      {QUICK_ACTIONS.map(({ id, label, icon: Icon, primary }) => (
+        <button
+          key={id}
+          type="button"
+          className={`quick-action${primary ? " is-primary" : ""}`}
+          onClick={() => onNavigate(id)}
+          style={{ "--qa-surface": t.surface, "--qa-border": t.border, "--qa-text": t.text, "--qa-muted": t.textMuted }}
+        >
+          <span className="quick-action__icon" aria-hidden="true">
+            <Icon size={16} strokeWidth={2.25} />
+          </span>
+          <span className="quick-action__label">{label}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 const SUBJECT_FILTERS = [{ id: "all", name: "All subjects" }, ...Object.values(SUBJECTS)];
 const STATUS_FILTERS = [
   { id: "all", label: "All statuses" },
@@ -5917,6 +5947,9 @@ export default function Orbis() {
                 <StatCard icon={Flame} label="Streak" value={streak.current} sub={`best: ${streak.longest}`} accent={STREAK_ACCENT} t={t} />
                 <StatCard icon={Zap} label="XP" value={profile.xp} sub="total earned" accent={ACCENT} t={t} />
               </div>
+
+              {/* Quick actions */}
+              <QuickActions onNavigate={setActiveTab} t={t} />
 
               {/* Syllabus + panels */}
               <div className="dashboard-panels">
