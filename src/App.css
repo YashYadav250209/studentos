@@ -2180,3 +2180,269 @@ input:focus {
     backdrop-filter: blur(8px);
   }
 }
+
+
+/* ==========================================================================
+   34. DAILY FOCUS GOAL (dashboard card)
+   Same surface recipe as the other dashboard cards: t.surface + GLASS inline
+   (so CardFX treats it like its neighbours), shadow-card at rest and
+   shadow-hover on pointer hover. Three states, never colour alone:
+     progress  accent ring, "Xm to reach your goal"
+     reached   mint ring + check, "Goal reached"
+     over      mint ring + check, "Goal reached · Xm beyond" (ring stays at 100%)
+   Light theme gets a deeper mint: #00e699 is too pale on the frosted sky surface.
+   ========================================================================== */
+
+.daily-focus {
+  --dfg-arc: var(--accent);
+  --dfg-status: var(--dfg-muted);
+  --dfg-ok: #00e699;
+  --dfg-ok-text: #00e699;
+
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 20px;
+  min-width: 0;
+  margin-bottom: 20px;
+  padding: 18px 22px;
+  color: var(--dfg-text);
+  box-shadow: var(--shadow-card);
+  transition:
+    box-shadow var(--transition-smooth),
+    border-color var(--transition-fast);
+}
+
+[data-theme="light"] .daily-focus {
+  --dfg-ok: #00855e;
+  --dfg-ok-text: #00704e;
+}
+
+.daily-focus[data-state="reached"],
+.daily-focus[data-state="over"] {
+  --dfg-arc: var(--dfg-ok);
+  --dfg-status: var(--dfg-ok-text);
+}
+
+/* Same soft top-left highlight the stat cards carry. */
+.daily-focus::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  pointer-events: none;
+  background: radial-gradient(circle at top left, rgba(255, 255, 255, 0.045), transparent 65%);
+}
+
+/* ---- progress ring ---- */
+
+.daily-focus__gauge {
+  position: relative;
+  flex-shrink: 0;
+  width: 72px;
+  height: 72px;
+}
+
+.daily-focus__gauge svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+}
+
+.daily-focus__track,
+.daily-focus__arc {
+  fill: none;
+  stroke-width: 6;
+}
+
+.daily-focus__track {
+  stroke: var(--dfg-text);
+  stroke-opacity: 0.12;
+}
+
+.daily-focus__arc {
+  stroke: var(--dfg-arc);
+  stroke-linecap: round;
+  transition:
+    stroke-dashoffset 700ms var(--ease-out-expo),
+    stroke var(--transition-smooth),
+    opacity var(--transition-fast);
+  animation: dailyFocusFill 900ms var(--ease-out-expo) backwards;
+}
+
+/* On mount only: the arc sweeps in from empty. 188.5 = ring circumference (2 * pi * 30). */
+@keyframes dailyFocusFill {
+  from { stroke-dashoffset: 188.5px; }
+}
+
+.daily-focus__center {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--dfg-text);
+}
+
+.daily-focus__center svg {
+  width: auto;
+  height: auto;
+  transform: none;
+  color: var(--dfg-muted);
+}
+
+/* ---- text ---- */
+
+.daily-focus__body {
+  min-width: 0;
+}
+
+.daily-focus__label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--dfg-muted);
+}
+
+.daily-focus__value {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 8px;
+  margin-top: 4px;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  line-height: 1.1;
+}
+
+.daily-focus__value strong {
+  font-size: 28px;
+  font-weight: 600;
+  color: var(--dfg-text);
+}
+
+.daily-focus__value span {
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--dfg-muted);
+}
+
+.daily-focus__status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.35;
+  color: var(--dfg-status);
+}
+
+.daily-focus__status svg {
+  flex-shrink: 0;
+}
+
+/* ---- Start Focus: a quiet accent text link. The Phase 1 tile directly above is the
+   dashboard's prominent Start Focus, so this one deliberately has no fill or border at
+   rest (transparent border = no layout shift on hover). Still a full 44px tap target. ---- */
+
+.daily-focus__cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 44px;
+  padding: 0 10px 0 14px;
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--accent-text);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  cursor: pointer;
+  transition:
+    transform var(--transition-fast),
+    border-color var(--transition-fast),
+    background-color var(--transition-fast);
+}
+
+@media (hover: hover) {
+  .daily-focus:hover {
+    box-shadow: var(--shadow-hover);
+  }
+
+  .daily-focus__cta:hover {
+    background: var(--accent-soft);
+    border-color: var(--accent-border);
+  }
+}
+
+.daily-focus__cta:active {
+  background: var(--accent-soft);
+}
+
+/* The global button:focus-visible rule would shrink the corners to 6px. */
+.daily-focus__cta:focus-visible {
+  border-radius: 10px;
+}
+
+/* ---- responsive ---- */
+
+@media (max-width: 820px) {
+  .daily-focus {
+    margin-bottom: 16px;
+  }
+}
+
+@media (max-width: 640px) {
+  .daily-focus {
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 14px 16px;
+    padding: 16px;
+  }
+
+  .daily-focus__gauge {
+    width: 64px;
+    height: 64px;
+  }
+
+  .daily-focus__center {
+    font-size: 14px;
+  }
+
+  .daily-focus__value strong {
+    font-size: 24px;
+  }
+
+  .daily-focus__value span {
+    font-size: 15px;
+  }
+
+  /* iOS-style footer action: full-width row under a hairline, flush with the card's edges. */
+  .daily-focus__cta {
+    grid-column: 1 / -1;
+    justify-content: space-between;
+    min-height: 46px;
+    margin: 0 -16px -16px;
+    padding: 0 16px;
+    border-width: 1px 0 0;
+    border-top-color: var(--glass-border);
+    border-radius: 0 0 13px 13px;
+  }
+
+  .daily-focus__cta:hover {
+    border-top-color: var(--glass-border);
+  }
+
+  .daily-focus__cta:focus-visible {
+    border-radius: 0 0 13px 13px;
+  }
+}

@@ -892,6 +892,123 @@ function QuickActions({ onNavigate, t }) {
   );
 }
 
+/* ---------------------------------------------------------------------------
+   DAILY FOCUS GOAL (dashboard card)
+   Derived entirely from the existing todayMinutes memo and profile.dailyGoalMinutes:
+   no new state, storage or session logic. Goal editing already lives in Today's Plan,
+   so a missing/invalid goal only describes that. Styling lives in App.css (§34).
+   --------------------------------------------------------------------------- */
+
+const DAILY_FOCUS_RING_R = 30;
+const DAILY_FOCUS_RING_C = 2 * Math.PI * DAILY_FOCUS_RING_R;
+
+// Pure. state: "no-goal" | "progress" | "reached" | "over".
+// todayMinutes is a float (sum of durationSec / 60); formatMinutes rounds it for display.
+function getDailyFocusStatus(todayMinutes, goalMinutes) {
+  const today = Number.isFinite(todayMinutes) && todayMinutes > 0 ? todayMinutes : 0;
+  const goal = Number(goalMinutes);
+  if (!Number.isFinite(goal) || goal <= 0) {
+    return { state: "no-goal", today, goal: 0, ratio: 0, percent: 0, remaining: 0, extra: 0 };
+  }
+  // Same comparison the daily-goal XP bonus uses, so "reached" always agrees with it.
+  if (today >= goal) {
+    const extra = Math.round(today - goal);
+    return { state: extra >= 1 ? "over" : "reached", today, goal, ratio: 1, percent: 100, remaining: 0, extra };
+  }
+  const ratio = today / goal;
+  return {
+    state: "progress", today, goal, ratio,
+    percent: Math.min(99, Math.floor(ratio * 100)), // never reads 100% until the goal is actually met
+    remaining: Math.ceil(goal - today),             // never "0m" while the goal is still unmet
+    extra: 0,
+  };
+}
+
+// "1h 12m" is read out letter by letter by some screen readers, so spell it out for aria text.
+function spokenMinutes(mins) {
+  const m = Math.round(mins);
+  const h = Math.floor(m / 60);
+  const r = m % 60;
+  const parts = [];
+  if (h) parts.push(`${h} ${h === 1 ? "hour" : "hours"}`);
+  if (r || !h) parts.push(`${r} ${r === 1 ? "minute" : "minutes"}`);
+  return parts.join(" ");
+}
+
+function DailyFocusCard({ todayMinutes, goalMinutes, onNavigate, t }) {
+  const s = getDailyFocusStatus(todayMinutes, goalMinutes);
+  const hasGoal = s.state !== "no-goal";
+  const reached = s.state === "reached" || s.state === "over";
+
+  const valueText = !hasGoal
+    ? ""
+    : reached
+      ? `Daily goal reached: ${spokenMinutes(s.today)} of ${spokenMinutes(s.goal)}${s.extra ? `, ${spokenMinutes(s.extra)} beyond your goal` : ""}`
+      : `${spokenMinutes(s.today)} of ${spokenMinutes(s.goal)}, ${s.percent} percent. ${spokenMinutes(s.remaining)} to reach your goal`;
+
+  return (
+    <section
+      className="daily-focus"
+      data-state={s.state}
+      aria-labelledby="daily-focus-label"
+      style={{
+        background: t.surface, ...GLASS, border: `1px solid ${t.border}`, borderRadius: 14,
+        "--dfg-text": t.text, "--dfg-muted": t.textMuted,
+      }}
+    >
+      <div
+        className="daily-focus__gauge"
+        {...(hasGoal
+          ? {
+              role: "progressbar", "aria-label": "Daily focus goal progress",
+              "aria-valuemin": 0, "aria-valuemax": 100, "aria-valuenow": s.percent, "aria-valuetext": valueText,
+            }
+          : { "aria-hidden": "true" })}
+      >
+        <svg viewBox="0 0 72 72" aria-hidden="true" focusable="false">
+          <circle className="daily-focus__track" cx="36" cy="36" r={DAILY_FOCUS_RING_R} />
+          <circle
+            className="daily-focus__arc" cx="36" cy="36" r={DAILY_FOCUS_RING_R}
+            style={{
+              strokeDasharray: DAILY_FOCUS_RING_C,
+              strokeDashoffset: DAILY_FOCUS_RING_C * (1 - s.ratio),
+              opacity: s.ratio > 0 ? 1 : 0, // a zero-length round-capped arc would still draw a dot
+            }}
+          />
+        </svg>
+        <span className="daily-focus__center" aria-hidden="true">
+          {hasGoal ? `${s.percent}%` : <Clock size={20} strokeWidth={2} />}
+        </span>
+      </div>
+
+      <div className="daily-focus__body">
+        <div id="daily-focus-label" className="daily-focus__label">Daily focus</div>
+        <div className="daily-focus__value">
+          <strong>{formatMinutes(s.today)}</strong>
+          {hasGoal && <span>/ {formatMinutes(s.goal)}</span>}
+        </div>
+        <div className="daily-focus__status">
+          {reached && <Check size={14} strokeWidth={2.75} aria-hidden="true" />}
+          <span>
+            {!hasGoal
+              ? "No daily goal set. Set one in Today's Plan."
+              : s.state === "progress"
+                ? `${formatMinutes(s.remaining)} to reach your goal`
+                : s.state === "over"
+                  ? `Goal reached · ${formatMinutes(s.extra)} beyond`
+                  : "Goal reached"}
+          </span>
+        </div>
+      </div>
+
+      <button type="button" className="daily-focus__cta" onClick={() => onNavigate("timer")}>
+        <span>Start Focus</span>
+        <ChevronRight size={16} strokeWidth={2.25} aria-hidden="true" />
+      </button>
+    </section>
+  );
+}
+
 const SUBJECT_FILTERS = [{ id: "all", name: "All subjects" }, ...Object.values(SUBJECTS)];
 const STATUS_FILTERS = [
   { id: "all", label: "All statuses" },
@@ -5950,6 +6067,9 @@ export default function Orbis() {
 
               {/* Quick actions */}
               <QuickActions onNavigate={setActiveTab} t={t} />
+
+              {/* Daily focus goal */}
+              <DailyFocusCard todayMinutes={todayMinutes} goalMinutes={profile.dailyGoalMinutes} onNavigate={setActiveTab} t={t} />
 
               {/* Syllabus + panels */}
               <div className="dashboard-panels">
